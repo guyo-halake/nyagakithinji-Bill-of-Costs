@@ -1,1 +1,0 @@
-# Core security & configuration package

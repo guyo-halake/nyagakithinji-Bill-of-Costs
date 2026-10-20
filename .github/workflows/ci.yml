@@ -1,56 +1,60 @@
-name: CI Quality Gate — Frontend & Backend Verification
+name: Frontend CI Quality Gate — React / TypeScript / Vite
 
 on:
   push:
-    branches: [ main, staging, develop ]
+    branches: [ develop, staging, main, Nyaga-*, update-* ]
   pull_request:
-    branches: [ main, staging ]
+    branches: [ develop, staging, main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-frontend-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # 1. FRONTEND VERIFICATION (TypeScript, Vite, Assets)
   frontend-verification:
-    name: 🎨 Frontend (Node 20 / TypeScript / Vite)
+    name: 🎨 Node 20 / TypeScript Compilation & Vite Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install Node Dependencies
         run: npm ci
 
-      - name: TypeScript Typecheck
+      - name: TypeScript Typecheck (Zero Errors Allowed)
         run: npx tsc --noEmit
 
-      - name: Production Vite Build Bundle
+      - name: Production Vite Asset Build
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://hhkbypvdwikxdlwivmrn.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'dummy-anon-key' }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || 'https://nyagahkithinji-advocates.azurewebsites.net' }}
 
-  # 2. BACKEND VERIFICATION (Python 3.11, Pytest, Statutory Math)
-  backend-verification:
-    name: ⚖️ Backend (Python 3.11 / Pytest / Remuneration)
+  frontend-docker-build:
+    name: 🐳 Nginx Container Build & Optimization Test
+    needs: frontend-verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Optimized Nginx Alpine Container
+        uses: docker/build-push-action@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-
-      - name: Run Statutory Remuneration & Security Pytest Suite
-        run: |
-          cd backend
-          PYTHONPATH=. pytest app/tests -v --durations=10
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: karani-frontend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

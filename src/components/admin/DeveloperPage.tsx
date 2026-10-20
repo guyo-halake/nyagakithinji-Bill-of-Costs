@@ -216,7 +216,7 @@ export const DeveloperPage: React.FC = () => {
                   <InputRow label="Document Versioning Rules" desc="Number of historical Excel versions to keep." placeholder="3" defaultValue="3" />
                   <ActionRow label="Access & Download Ledger" desc="View exactly who downloaded which files." btnText="View Audit Log" />
                   <ActionRow label="Global CDN Cache Purge" desc="Clear Vercel edge network cache for static PDFs." btnText="Purge Edge Cache" />
-                  <ActionRow label="Vault Backup Sync" desc="Mirror Supabase bucket to external AWS S3." btnText="Trigger Backup" />
+                  <ActionRow label="Vault Backup Sync" desc="Mirror Supabase bucket to secondary encrypted cloud vault." btnText="Trigger Backup" />
                   <ToggleRow label="Automated OCR Integration" desc="Extract text from scanned PDFs via Python." />
                   <ToggleRow label="File Renaming Regex Rules" desc="Force uploads to follow YYYY-MM-DD standard." defaultOn />
                   <ActionRow label="Folder Structure Taxonomy" desc="Manage global virtual folders (Pleadings, Evidence)." btnText="Manage Folders" />
@@ -318,7 +318,7 @@ export const DeveloperPage: React.FC = () => {
                   <InputRow label="FastAPI Uvicorn Thread Scaler" desc="Number of Python worker threads." placeholder="4" defaultValue="4" />
                   <ActionRow label="Database Schema Migration GUI" desc="Push raw SQL updates to Supabase safely." btnText="Launch SQL Editor" />
                   <InputRow label="Supabase Connection Limits" desc="PgBouncer connection pool max size." placeholder="100" defaultValue="100" />
-                  <ActionRow label="Automated PostgreSQL pg_dump" desc="Trigger hard backup to AWS S3 bucket." btnText="Trigger Backup" />
+                  <ActionRow label="Automated PostgreSQL pg_dump" desc="Trigger hard backup to secondary cloud storage." btnText="Trigger Backup" />
                   <ActionRow label="Python API Latency Heatmaps" desc="Track routes taking > 500ms to resolve." btnText="View Trace Logs" />
                   <ActionRow label="Supabase RLS Generator" desc="Adjust strict Row Level Security rules." btnText="Edit RLS Rules" />
                   <ActionRow label="Secrets Vault Manager" desc="Rotate JWT/API secrets without touching .env." btnText="Rotate Keys" />

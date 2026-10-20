@@ -25,6 +25,7 @@ export const AdminUsersRolesView: React.FC = () => {
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
   const [otpCountdown, setOtpCountdown] = useState(300);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const apiBase = ((import.meta as any).env?.VITE_API_BASE_URL as string) || '';
 
   // Add form fields
   const [fullName, setFullName] = useState('');
@@ -135,7 +136,7 @@ export const AdminUsersRolesView: React.FC = () => {
     setIsSubmitting(true);
     const adminEmail = 'vickarani@gmail.com'; // Logged-in admin
     try {
-      const res = await fetch('http://localhost:8000/api/v1/auth-2fa/send-otp', {
+      const res = await fetch(`${apiBase}/api/v1/auth-2fa/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -175,7 +176,7 @@ export const AdminUsersRolesView: React.FC = () => {
       // 1. Verify OTP with Backend
       let token = `token_2fa_${otpSentEmail}_${Date.now()}`;
       try {
-        const verifyRes = await fetch('http://localhost:8000/api/v1/auth-2fa/verify-otp', {
+        const verifyRes = await fetch(`${apiBase}/api/v1/auth-2fa/verify-otp`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -198,7 +199,7 @@ export const AdminUsersRolesView: React.FC = () => {
 
         // 3. Notify backend of completed password change & alert dispatch
         try {
-          await fetch('http://localhost:8000/api/v1/auth-2fa/admin-update-password', {
+          await fetch(`${apiBase}/api/v1/auth-2fa/admin-update-password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
