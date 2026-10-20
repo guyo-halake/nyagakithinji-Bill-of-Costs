@@ -384,13 +384,13 @@ export const AdminFirmsView: React.FC = () => {
             <span className="text-[11px] text-[var(--text-muted)] uppercase font-sans font-bold">Documentation and Users Storage</span>
           </div>
           <p className="text-lg font-extrabold text-blue-500">100 GB Hash Encrypt</p>
-          <p className="text-[11px] text-[var(--text-muted)] font-sans">Automated Supabase S3 Backup Enabled. Backup to AWS S3 Enabled.</p>
+          <p className="text-[11px] text-[var(--text-muted)] font-sans">Automated encrypted cloud storage backup enabled.</p>
         </div>
 
         <div className="vercel-card p-5 space-y-2">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4 text-emerald-500" />
-            <span className="text-[11px] text-[var(--text-muted)] uppercase font-sans font-bold">AWS Seat Licences</span>
+            <span className="text-[11px] text-[var(--text-muted)] uppercase font-sans font-bold">Active Seat Licences</span>
           </div>
           <p className="text-lg font-extrabold text-emerald-500">4 Active Seats</p>
           <p className="text-[11px] text-[var(--text-muted)] font-sans">Administartor, Systems Developer - P3L Developers IC, Advocates and Lawyers, Managing and Exec</p>

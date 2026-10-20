@@ -4,7 +4,7 @@ import { Server, ShieldAlert, Cpu, HardDrive, RefreshCw, Power, AlertOctagon, Ch
 export const AdminServerControlView: React.FC = () => {
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [dockerStatus, setDockerStatus] = useState('RUNNING (karani-law-app:v2.4.0)');
-  const [awsStatus, setAwsStatus] = useState('HEALTHY (ecs-karani-prod-cluster)');
+  const [azureStatus, setAzureStatus] = useState('HEALTHY (azure-appservice-prod)');
   const [vercelStatus, setVercelStatus] = useState('DEPLOYED (karani-law-billszip.vercel.app)');
   const [githubStatus, setGithubStatus] = useState('PASSED (Commit #98af9236)');
   const [isPurgingCdn, setIsPurgingCdn] = useState(false);
@@ -39,7 +39,7 @@ export const AdminServerControlView: React.FC = () => {
             Emergency Server & Infrastructure Control
           </h1>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            11 Master Infrastructure Controls for Docker, AWS ECS, Vercel CDN, GitHub CI/CD & Maintenance Kill-Switch
+            11 Master Infrastructure Controls for Docker, Azure Cloud, Vercel CDN, GitHub CI/CD & Maintenance Kill-Switch
           </p>
         </div>
 
@@ -84,13 +84,13 @@ export const AdminServerControlView: React.FC = () => {
           <p className="text-[10px] text-[var(--text-muted)]">Container Uptime: 99.99%</p>
         </div>
 
-        {/* AWS ECS */}
-        <div className="vercel-card p-5 space-y-2 border-t-4 border-t-amber-500">
+        {/* Azure App Service */}
+        <div className="vercel-card p-5 space-y-2 border-t-4 border-t-blue-600">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-[var(--text-muted)] uppercase font-sans font-semibold">2. AWS ECS Cluster</span>
-            <Cpu className="w-4 h-4 text-amber-500" />
+            <span className="text-[10px] text-[var(--text-muted)] uppercase font-sans font-semibold">2. Azure Web App</span>
+            <Cpu className="w-4 h-4 text-blue-600" />
           </div>
-          <p className="text-emerald-500 font-bold text-xs">{awsStatus}</p>
+          <p className="text-emerald-500 font-bold text-xs">{azureStatus}</p>
           <p className="text-[10px] text-[var(--text-muted)]">Tasks Running: 4 / 4</p>
         </div>
 

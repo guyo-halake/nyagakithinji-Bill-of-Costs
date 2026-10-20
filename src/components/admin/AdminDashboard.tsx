@@ -3205,24 +3205,24 @@ export const AdminDashboard: React.FC = () => {
                         </p>
                       </div>
 
-                      {/* CARD 4: AWS DEVELOPER / DEVOPS */}
+                      {/* CARD 4: AZURE DEVELOPER / DEVOPS */}
                       <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs space-y-3">
                         <div className="flex justify-between items-center">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                            Ongoing Study
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/15 text-blue-700 dark:text-blue-300">
+                            Active Study
                           </span>
-                          <span className="text-[10px] font-mono text-zinc-400">AWS DevOps</span>
+                          <span className="text-[10px] font-mono text-zinc-400">Azure DevOps</span>
                         </div>
                         <div>
                           <h3 className="font-bold text-sm text-zinc-900 dark:text-white">
-                            AWS Certified DevOps Engineer / Developer
+                            Azure DevOps Engineer Expert (AZ-400)
                           </h3>
-                          <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold mt-1">
-                            Amazon Web Services
+                          <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mt-1">
+                            Microsoft Azure
                           </p>
                         </div>
                         <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                          Hands-on AWS cloud infrastructure: EC2, VPC, IAM, S3, CI/CD with CodePipeline, Terraform, and automated deployment pipelines.
+                          Azure cloud infrastructure: ACR, App Service, VNet, Managed Identities, GitHub Actions CI/CD, and Terraform IaC.
                         </p>
                       </div>
                     </div>
@@ -3404,7 +3404,7 @@ export const AdminDashboard: React.FC = () => {
                         Cloud &amp; Infrastructure
                       </h4>
                       <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
-                        {['Microsoft Azure', 'AWS (EC2, VPC, IAM)', 'Docker', 'Terraform', 'CI/CD GitHub Actions', 'GitLab CI', 'WireGuard VPN', 'Ubuntu Server', 'Active Directory'].map(s => (
+                        {['Microsoft Azure (App Service, ACR, VNet)', 'Docker Multi-Stage', 'Terraform (azurerm)', 'CI/CD GitHub Actions', 'Linux Containers', 'Nginx Reverse Proxy', 'Supabase PostgreSQL', 'WireGuard VPN', 'Active Directory'].map(s => (
                           <span key={s} className="px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200">
                             {s}
                           </span>
