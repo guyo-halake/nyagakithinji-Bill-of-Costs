@@ -31,6 +31,14 @@ Runs at `http://localhost:3001`.
 - `VITE_SUPABASE_ANON_KEY`: Supabase public anon key
 - `VITE_API_BASE_URL`: Backend API URL (`http://localhost:8000` for local dev)
 
+## System Specifications
+- **Client Architecture**: Single Page Application (SPA), React 18, TypeScript (strict mode)
+- **Styling & Design System**: Tailwind CSS, responsive mobile-first grid, Lucide icons
+- **State & Data Layer**: Client-side reactive stores, Supabase Auth + Postgres, Supabase S3 Storage
+- **API Gateway Integration**: REST client connecting to FastAPI backend over HTTPS / TLS 1.3
+- **Container Specs**: Linux amd64, non-privileged port 3000/80, zero-daemon lightweight footprint (< 40MB image)
+- **Target Environments**: Node 20 LTS, Chromium >= 100, Firefox >= 100, Safari >= 15
+
 ## Build
 ```bash
 npx tsc --noEmit   # type check

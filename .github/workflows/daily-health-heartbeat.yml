@@ -1,0 +1,32 @@
+name: 🩺 Daily Cloud Health Heartbeat & Audit
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Runs automatically every day at 6:00 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  daily-heartbeat:
+    name: 🩺 Record Daily Production Health Heartbeat
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Probe Production Azure Health & Record Timestamp
+        run: |
+          mkdir -p .telemetry
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://nyagahkithinji-advocates.azurewebsites.net/api/v1/health" || echo "offline")
+          echo "{\"last_audit\": \"$TIMESTAMP\", \"status\": \"$STATUS\", \"verified_by\": \"github-actions\"}" > .telemetry/heartbeat.json
+
+      - name: Commit & Push Daily Status
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .telemetry/heartbeat.json
+          git commit -m "chore(telemetry): daily production health verification [$TIMESTAMP]" || echo "No changes"
+          git push

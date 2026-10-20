@@ -1,0 +1,6 @@
+{
+  "service": "karani-law-web",
+  "endpoint": "https://nyagahkithinji-advocates.azurewebsites.net/api/v1/health",
+  "status": "ready",
+  "verified_by": "github-actions"
+}
