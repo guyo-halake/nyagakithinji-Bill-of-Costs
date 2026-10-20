@@ -1,109 +1,99 @@
-# ⚖️ Karani Law — Advocates Practice Management & Remuneration Platform
+# ⚖️ Karani Law — Advocates Practice Management Frontend
 > **Nyagah B. Kithinji & Co. Advocates**
-> Enterprise legal operations platform powered by **React 18 + TypeScript, Python 3.11 FastAPI, Supabase (PostgreSQL + RLS + S3 Vault), Production Docker Multi-Stage Containerization, GitHub Actions CI/CD, and Microsoft Azure Cloud Infrastructure**.
+> Modern legal operations frontend built on **React 18 + TypeScript, TailwindCSS, Vite, Supabase Realtime, and Alpine Nginx Containerization**.
 
-[![CI Quality Gate](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/ci.yml/badge.svg?branch=Nyaga-v2)](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/ci.yml)
-[![CD Azure Deployment](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/cd-azure.yml/badge.svg)](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/cd-azure.yml)
-![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?logo=fastapi)
+> 🔗 **Decoupled Architecture Notice**:
+> This repository houses the client-side single page application (SPA).
+> The **Python 3.11 FastAPI statutory calculation engine, Docker containerization, and Azure CI/CD cloud deployment** are maintained in the dedicated repository:
+> 👉 **[nyagahK_azure_backend](https://github.com/guyo-halake/nyagahK_azure_backend)**
+
+[![Frontend CI Quality Gate](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/ci.yml/badge.svg?branch=Nyaga-v2)](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/ci.yml)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript)
-![Docker](https://img.shields.io/badge/Docker-Multi--Stage-2496ED?logo=docker)
-![Azure](https://img.shields.io/badge/Cloud-Microsoft_Azure-0078D4?logo=microsoftazure)
+![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
+![Nginx](https://img.shields.io/badge/Nginx-Alpine-009639?logo=nginx)
+![Supabase](https://img.shields.io/badge/Supabase-Auth_%26_Realtime-3ECF8E?logo=supabase)
 
 ---
 
-## 🚀 Key Platform Capabilities
-
-1. **Kenyan Advocates Remuneration Engine (`/backend/app/engine/remuneration_engine.py`)**:
-   - Automated legal bill calculation under **Kenya Law LN 64/1962 (2014 Amendment Order)**.
-   - **Schedule 6 (High Court, Court of Appeal, ELC, ELRC)** ad valorem scale calculations.
-   - **Schedule 7 (Subordinate / Magistrate's Courts)** scale calculations.
-   - **Getting-Up Fees** (33.33% / 1/3 of instruction fee floor).
-   - Itemized folio work (Drawings @ Kshs 500/folio, Copying @ Kshs 50/folio, Court Attendances @ Kshs 2,500/hr, Formal Letters @ Kshs 500) + 16% VAT computation.
-   - Validated against precedent taxation records (*Seyani Brothers v Greenhills* [KES 30.8M], *Dhanya Construction v Sunil Shah*).
-
-2. **React + TypeScript Modern UI Shell (`/src`)**:
-   - Bill of Costs interactive builder with real-time statutory breakdown.
-   - Fee Notes vault, litigation matter management, and PDF/Excel generation.
-   - Role-Based Access Control (Senior Partner, Associate Advocate, Finance Officer).
-
-3. **Production Hardened Containerization**:
-   - Multi-stage Docker builds separating build tools from runtime.
-   - Unprivileged non-root user execution (`appuser:appgroup` UID 10001).
-   - Integrated container health check probes on both frontend (Nginx) and backend (FastAPI).
-
----
-
-## 🛠️ System Architecture & CI/CD Delivery
+## 🏛️ System Microservice Architecture
 
 ```mermaid
-graph TD
-    User([Advocate / Client Browser]) -->|HTTPS Port 443| Nginx[Frontend Nginx Container]
-    Nginx -->|SPA Static Assets| ReactApp[React 18 + TypeScript Client]
-    ReactApp -->|REST API /api/v1| FastAPI[FastAPI Backend Container - Port 8000]
-    ReactApp -->|Realtime / Auth / Storage| Supabase[(Supabase PostgreSQL + RLS + S3 Vault)]
-    FastAPI -->|Statutory Math & Validation| Engine[Remuneration Engine]
+graph LR
+    subgraph Frontend Repository: nyagakithinji-Bill-of-Costs
+        ReactApp[React 18 + TypeScript SPA] --> Nginx[Production Nginx Alpine Container]
+    end
 
-    subgraph CI/CD Release Lifecycle
-        GitPush[Git Push / Pull Request] --> CI[ci.yml: Quality Gate]
-        CI --> Pytest[18 Pytests: Math, Security & Health]
-        CI --> TSC[TypeScript Check & Vite Build]
-        CI --> DockerSmoke[Docker Buildx Smoke Test]
-        
-        DockerSmoke -->|Develop Branch| DevEnv[Develop Environment]
-        DevEnv -->|Merge to Staging| StagingDeploy[cd-azure.yml: Auto-Deploy to Staging]
-        StagingDeploy --> StagingAzure[Azure Web App: Staging Slot]
-        
-        StagingAzure -->|Manual Approval Gate| ProdDeploy[Deploy to Production]
-        ProdDeploy --> ProdAzure[Azure Web App: Production]
+    subgraph Backend Microservice: nyagahK_azure_backend
+        FastAPI[Python 3.11 FastAPI Engine] --> Engine[Statutory Remuneration Order Math]
+        FastAPI --> Auth2FA[2FA OTP & Security]
+    end
+
+    subgraph Cloud Infrastructure
+        ReactApp -->|REST API Requests: VITE_API_BASE_URL| FastAPI
+        ReactApp -->|Auth / Realtime / Vault| Supabase[(Supabase PostgreSQL + S3)]
+        FastAPI -->|Container Image| AzureACR[Azure Container Registry]
+        AzureACR --> AzureApp[Azure App Service: Staging & Production]
     end
 ```
 
 ---
 
-## 🌐 Enterprise Multi-Environment Pipeline
+## 🚀 Key Client Capabilities
 
-| Environment | Trigger | Target Azure Endpoint | Promotion Strategy |
-| :--- | :--- | :--- | :--- |
-| **Develop** | PR to `develop` / feature branch | Local Docker / Smoke runner | 18 Pytests + TypeScript check + Container smoke test |
-| **Staging** | Push / merge to `staging` branch | `https://nyagahkithinji-advocates-staging.azurewebsites.net` | Automated ACR push & deployment with post-deploy health check |
-| **Production** | Push / merge to `main` branch | `https://nyagahkithinji-advocates.azurewebsites.net` | Protected GitHub environment, manual review, zero downtime |
+1. **Advocates Remuneration Order Builder (`src/components/feenotes`)**:
+   - Interactive Bill of Costs taxation builder with real-time statutory scale breakdowns.
+   - Dynamic schedule toggles (Schedule 6 High Court, Schedule 7 Subordinate Courts, Conveyancing, Probate).
+   - Instant calculation preview with automatic fallback to client-side rule evaluation.
+
+2. **Real-Time Matters & Litigation Management (`src/components/matters`)**:
+   - Case pipeline tracking active disputes, court schedules, claim values, and party records.
+   - Authoritative precedent records (*Seyani Brothers v Greenhills* [KES 30.8M], *Dhanya Construction v Sunil Shah*).
+
+3. **Multi-Role Access Control (RBAC)**:
+   - Senior Partner, Associate Advocate, Finance Officer, and Legal Assistant views.
+   - 2FA OTP verification for administrative password resets and privilege elevation.
 
 ---
 
-## ⚡ How to Run Locally
+## ⚡ Environment Configuration
 
-### Option 1: One-Command Docker Compose (Recommended)
-Make sure Docker Desktop is running, then execute:
+Copy `.env.example` to `.env.local`:
+```bash
+cp .env.example .env.local
+```
+
+| Variable | Description | Default / Example |
+| :--- | :--- | :--- |
+| `VITE_SUPABASE_URL` | Supabase Project URL | `https://your-id.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | Supabase Anon Public Key | `eyJhbGciOi...` |
+| `VITE_API_BASE_URL` | FastAPI Backend API Base URL | `http://localhost:8000` (Local) / `https://nyagahkithinji-advocates.azurewebsites.net` (Prod) |
+
+---
+
+## 🛠️ Running Locally
+
+### Development Mode:
+```bash
+npm install
+npm run dev
+```
+* Client launches on [http://localhost:3000](http://localhost:3000) with automatic hot-module reloading (HMR).
+
+### Containerized Production Build:
 ```bash
 docker compose up --build
 ```
-* **Frontend Web Application**: [http://localhost:3001](http://localhost:3001)
-* **FastAPI Backend & Health Probe**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
-* **Interactive API Documentation (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-### Option 2: Running Directly (Development Mode)
-1. **Launch FastAPI Backend**:
-   ```powershell
-   cd backend
-   pip install -r requirements.txt
-   python -m uvicorn app.main:app --reload --port 8000
-   ```
-2. **Launch React Frontend**:
-   ```powershell
-   npm install
-   npm run dev
-   ```
+* Optimized Nginx container serves production static assets on [http://localhost:3001](http://localhost:3001).
 
 ---
 
-## 🧪 Automated Testing
+## 🧪 Verification & Typechecking
 
-Run the full Python legal calculation and API test suite:
-```powershell
-cd backend
-python -m pytest app/tests -v
+```bash
+# Verify TypeScript integrity
+npx tsc --noEmit
+
+# Test production asset bundle compilation
+npm run build
 ```
-* `test_remuneration.py`: Verifies Schedule 6, Schedule 7, litigation toggles, getting-up fees, and 1/6th rule.
-* `test_security.py`: Verifies JWT authentication, bcrypt password hashing, and token expiration.
-* `test_database_and_api.py`: Verifies health endpoints, statutory schedules, and fee notes integrity.

@@ -3,48 +3,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: karani-law-frontend
     ports:
       - "${FRONTEND_PORT:-3001}:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: always
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
     environment:
-      - PORT=8000
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:8080,https://kithinjiandco.vercel.app}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-karani-law-advocates-production-jwt-security-key-2026-auth-token-secret-string-9920}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USERNAME=${SMTP_USERNAME:-p3lcodes@gmail.com}
-      - SMTP_PASSWORD=${SMTP_PASSWORD}
-      - SMTP_FROM=${SMTP_FROM:-p3lcodes@gmail.com}
-      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    restart: always
-
-  billszip-legacy:
-    build:
-      context: ./Billszip
-      dockerfile: Dockerfile
-    ports:
-      - "8080:80"
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
     restart: always
 
 networks:
   default:
-    name: lexflow-network
+    name: karani-frontend-network

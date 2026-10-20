@@ -1,47 +1,17 @@
-name: CI Quality Gate — Verification & Docker Smoke Tests
+name: Frontend CI Quality Gate — React / TypeScript / Vite
 
 on:
   push:
-    branches: [ develop, staging, main, update-*, Nyaga-* ]
+    branches: [ develop, staging, main, Nyaga-*, update-* ]
   pull_request:
     branches: [ develop, staging, main ]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-frontend-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ============================================================================
-  # 1. BACKEND VERIFICATION: Statutory Math, Security & API Endpoints
-  # ============================================================================
-  backend-verification:
-    name: ⚖️ Python 3.11 / Statutory Remuneration & Database Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-
-      - name: Execute Full Pytest Suite (Statutory Math, Security & Health)
-        run: |
-          cd backend
-          PYTHONPATH=. pytest app/tests -v --durations=10
-
-  # ============================================================================
-  # 2. FRONTEND VERIFICATION: TypeScript Static Analysis & Production Build
-  # ============================================================================
   frontend-verification:
     name: 🎨 Node 20 / TypeScript Compilation & Vite Build
     runs-on: ubuntu-latest
@@ -66,13 +36,11 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://hhkbypvdwikxdlwivmrn.supabase.co' }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'dummy-anon-key' }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || 'https://nyagahkithinji-advocates.azurewebsites.net' }}
 
-  # ============================================================================
-  # 3. DOCKER VERIFICATION: Multi-Stage Build & Container Health Probing
-  # ============================================================================
-  docker-smoke-test:
-    name: 🐳 Docker Multi-Stage Build & Healthcheck Smoke Test
-    needs: [backend-verification, frontend-verification]
+  frontend-docker-build:
+    name: 🐳 Nginx Container Build & Optimization Test
+    needs: frontend-verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -81,39 +49,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Hardened Backend Container
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          load: true
-          tags: karani-backend:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Smoke Test Backend Container (Non-root & Health Probe)
-        run: |
-          docker run -d --name test-api -p 8000:8000 \
-            -e PORT=8000 \
-            -e APP_ENV=test \
-            -e JWT_SECRET_KEY=ci-test-secret-key-32-chars-long-1234567 \
-            karani-backend:test
-          
-          # Poll health endpoint up to 25 seconds
-          echo "Waiting for container startup..."
-          for i in {1..25}; do
-            if curl -s http://localhost:8000/api/v1/health | grep -q "healthy"; then
-              echo "✓ Backend container is healthy and responding!"
-              break
-            fi
-            sleep 1
-          done
-
-          # Verify statutory calculation API endpoint inside container
-          curl -f http://localhost:8000/api/v1/remuneration/schedules
-          docker stop test-api
-
-      - name: Build Frontend Container
+      - name: Build Optimized Nginx Alpine Container
         uses: docker/build-push-action@v5
         with:
           context: .
