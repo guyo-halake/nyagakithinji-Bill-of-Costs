@@ -1,87 +1,109 @@
-# ⚖️ Billszip — Real-Time Advocates Legal Management Platform
-> **Nyagah B. Kithinji & Co. Advocates (Karani Law)**
-> Production-grade, real-time legal operations platform built on **Billszip (HTML5/JS App Shell), Python 3.11 FastAPI Backend, Supabase (PostgreSQL + Realtime + Storage), Docker Containerization, GitHub Actions CI/CD, and AWS Terraform IaC**.
+# ⚖️ Karani Law — Advocates Practice Management & Remuneration Platform
+> **Nyagah B. Kithinji & Co. Advocates**
+> Enterprise legal operations platform powered by **React 18 + TypeScript, Python 3.11 FastAPI, Supabase (PostgreSQL + RLS + S3 Vault), Production Docker Multi-Stage Containerization, GitHub Actions CI/CD, and Microsoft Azure Cloud Infrastructure**.
+
+[![CI Quality Gate](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/ci.yml/badge.svg?branch=Nyaga-v2)](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/ci.yml)
+[![CD Azure Deployment](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/cd-azure.yml/badge.svg)](https://github.com/guyo-halake/nyagakithinji-Bill-of-Costs/actions/workflows/cd-azure.yml)
+![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?logo=fastapi)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript)
+![Docker](https://img.shields.io/badge/Docker-Multi--Stage-2496ED?logo=docker)
+![Azure](https://img.shields.io/badge/Cloud-Microsoft_Azure-0078D4?logo=microsoftazure)
 
 ---
 
 ## 🚀 Key Platform Capabilities
 
-1. **Billszip Real-Time Legal Vault (`/Billszip/excel-vault.html`)**:
-   - Encrypted document storage linked to **Supabase S3 Storage**.
-   - Drag-and-drop file upload, version control (`v1.0`, `v2.0`), tag filtering (`#taxation`, `#high_court`, `#pleading`), and instant real-time synchronization.
-
-2. **Kenyan Advocates Remuneration Engine (`/backend/app/engine/remuneration_engine.py`)**:
+1. **Kenyan Advocates Remuneration Engine (`/backend/app/engine/remuneration_engine.py`)**:
    - Automated legal bill calculation under **Kenya Law LN 64/1962 (2014 Amendment Order)**.
    - **Schedule 6 (High Court, Court of Appeal, ELC, ELRC)** ad valorem scale calculations.
-   - **Schedule 5 (Magistrate's Court)** legal instruction fees.
+   - **Schedule 7 (Subordinate / Magistrate's Courts)** scale calculations.
    - **Getting-Up Fees** (33.33% / 1/3 of instruction fee floor).
-   - Itemized folio work (Drawings @ Kshs 500/folio, Copying @ Kshs 50/folio, Court Attendances @ Kshs 2,500/hr, Demand Letters @ Kshs 500) + 16% VAT computation.
+   - Itemized folio work (Drawings @ Kshs 500/folio, Copying @ Kshs 50/folio, Court Attendances @ Kshs 2,500/hr, Formal Letters @ Kshs 500) + 16% VAT computation.
+   - Validated against precedent taxation records (*Seyani Brothers v Greenhills* [KES 30.8M], *Dhanya Construction v Sunil Shah*).
 
-3. **Billszip Matters & Litigation Pipeline (`/Billszip/matters.html`)**:
-   - Law firm case pipeline tracking active litigations, claim values (`Kshs 49M+`), and court taxation stages (*Seyani Brothers v Greenhills*, *Dhanya v Sunil Shah*).
+2. **React + TypeScript Modern UI Shell (`/src`)**:
+   - Bill of Costs interactive builder with real-time statutory breakdown.
+   - Fee Notes vault, litigation matter management, and PDF/Excel generation.
+   - Role-Based Access Control (Senior Partner, Associate Advocate, Finance Officer).
 
-4. **Billszip Remuneration Builder (`/Billszip/bill-of-costs-builder.html`)**:
-   - Interactive Advocates Remuneration Order bill builder connected to the Python FastAPI backend service with fallback to client-side JS engine (`/Billszip/remuneration.js`).
+3. **Production Hardened Containerization**:
+   - Multi-stage Docker builds separating build tools from runtime.
+   - Unprivileged non-root user execution (`appuser:appgroup` UID 10001).
+   - Integrated container health check probes on both frontend (Nginx) and backend (FastAPI).
 
 ---
 
-## 🛠️ Architecture Overview
+## 🛠️ System Architecture & CI/CD Delivery
 
 ```mermaid
 graph TD
-    Client[Billszip Law Firm App Shell - HTML5 / JS] -->|WebSocket Realtime| SupabaseRT[Supabase Realtime Engine]
-    Client -->|Auth / DB / Storage| Supabase[Supabase PostgreSQL + RLS + S3 Buckets]
-    Client -->|REST API| FastAPI[Python FastAPI Backend Microservice]
-    
-    subgraph FastAPI Engine
-        Remun[Advocates Remuneration Engine - Schedule 1, 5, 6]
-        DocProc[Legal Document Metadata & Processing]
-    end
+    User([Advocate / Client Browser]) -->|HTTPS Port 443| Nginx[Frontend Nginx Container]
+    Nginx -->|SPA Static Assets| ReactApp[React 18 + TypeScript Client]
+    ReactApp -->|REST API /api/v1| FastAPI[FastAPI Backend Container - Port 8000]
+    ReactApp -->|Realtime / Auth / Storage| Supabase[(Supabase PostgreSQL + RLS + S3 Vault)]
+    FastAPI -->|Statutory Math & Validation| Engine[Remuneration Engine]
 
-    subgraph DevOps & Deployment
-        GH[GitHub Actions CI/CD Pipeline] -->|Lint / TypeCheck / Test| Docker[Docker Multi-Stage Build]
-        Docker -->|Staging Auto-Deploy| Staging[Staging AWS ECS / EC2]
-        Staging -->|Manual Approval Gate| Production[Production AWS EC2 / VPC]
-        TF[Terraform IaC Repo] -->|Provision Infrastructure| AWS[AWS VPC / Subnets / S3 / EC2]
+    subgraph CI/CD Release Lifecycle
+        GitPush[Git Push / Pull Request] --> CI[ci.yml: Quality Gate]
+        CI --> Pytest[18 Pytests: Math, Security & Health]
+        CI --> TSC[TypeScript Check & Vite Build]
+        CI --> DockerSmoke[Docker Buildx Smoke Test]
+        
+        DockerSmoke -->|Develop Branch| DevEnv[Develop Environment]
+        DevEnv -->|Merge to Staging| StagingDeploy[cd-azure.yml: Auto-Deploy to Staging]
+        StagingDeploy --> StagingAzure[Azure Web App: Staging Slot]
+        
+        StagingAzure -->|Manual Approval Gate| ProdDeploy[Deploy to Production]
+        ProdDeploy --> ProdAzure[Azure Web App: Production]
     end
 ```
 
-| Component | Location | Description |
-| :--- | :--- | :--- |
-| **Billszip Frontend App** | `c:\Users\guyoh\Desktop\Karani Law\Billszip\` | Main HTML5/CSS3/JS Law Firm SPA |
-| **Python Backend Service** | `c:\Users\guyoh\Desktop\Karani Law\backend\` | FastAPI Legal Fee Engine & Pytest Suite |
-| **Database Schema** | `c:\Users\guyoh\Desktop\Karani Law\supabase\` | PostgreSQL RLS Migration (`00001_initial_schema.sql`) |
-| **Docker Compose** | `c:\Users\guyoh\Desktop\Karani Law\docker-compose.yml` | Multi-container launcher (Billszip + FastAPI) |
-| **CI/CD Workflows** | `c:\Users\guyoh\Desktop\Karani Law\.github\workflows\` | GitHub Actions (`ci-cd.yml`, `terraform.yml`) |
-| **AWS Terraform IaC** | `c:\Users\guyoh\Desktop\Karani Law\terraform\` | Infrastructure configuration for AWS VPC/EC2/S3 |
+---
+
+## 🌐 Enterprise Multi-Environment Pipeline
+
+| Environment | Trigger | Target Azure Endpoint | Promotion Strategy |
+| :--- | :--- | :--- | :--- |
+| **Develop** | PR to `develop` / feature branch | Local Docker / Smoke runner | 18 Pytests + TypeScript check + Container smoke test |
+| **Staging** | Push / merge to `staging` branch | `https://nyagahkithinji-advocates-staging.azurewebsites.net` | Automated ACR push & deployment with post-deploy health check |
+| **Production** | Push / merge to `main` branch | `https://nyagahkithinji-advocates.azurewebsites.net` | Protected GitHub environment, manual review, zero downtime |
 
 ---
 
-## ⚡ How to Run
+## ⚡ How to Run Locally
 
-### Option 1: Running directly with Python & Web Server (No Docker)
-1. Launch Python FastAPI backend:
+### Option 1: One-Command Docker Compose (Recommended)
+Make sure Docker Desktop is running, then execute:
+```bash
+docker compose up --build
+```
+* **Frontend Web Application**: [http://localhost:3001](http://localhost:3001)
+* **FastAPI Backend & Health Probe**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+* **Interactive API Documentation (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+### Option 2: Running Directly (Development Mode)
+1. **Launch FastAPI Backend**:
    ```powershell
-   cd "c:\Users\guyoh\Desktop\Karani Law\backend"
+   cd backend
    pip install -r requirements.txt
    python -m uvicorn app.main:app --reload --port 8000
    ```
-2. Open `Billszip/home.html` or `Billszip/index.html` in your web browser.
-
-### Option 2: Running with Docker Compose
-```bash
-docker-compose up --build -d
-```
-- **Billszip Web App**: http://localhost:3000
-- **FastAPI API Swagger Docs**: http://localhost:8000/docs
+2. **Launch React Frontend**:
+   ```powershell
+   npm install
+   npm run dev
+   ```
 
 ---
 
-## 🌐 Production Cloud Deployment & Enterprise Operations
+## 🧪 Automated Testing
 
-- **Production Cloud Host**: Microsoft Azure App Service for Containers
-- **Target Production URL**: `https://nyagahkithinji-advocates.azurewebsites.net`
-- **Container Registry**: Azure Container Registry (ACR)
-- **IT Support & Operations Desk**: Managed by **P3L Developers** (Razak Guyo & Victor Karani)
-- **Digital Security**: Micro-QR Cryptographic Stamping and SHA-256 Tamper Verification Engine
-- **Statutory Remuneration**: Advocates (Remuneration) Order (LN 64/1962 & LN 35/2014) Schedules 1 through 12
+Run the full Python legal calculation and API test suite:
+```powershell
+cd backend
+python -m pytest app/tests -v
+```
+* `test_remuneration.py`: Verifies Schedule 6, Schedule 7, litigation toggles, getting-up fees, and 1/6th rule.
+* `test_security.py`: Verifies JWT authentication, bcrypt password hashing, and token expiration.
+* `test_database_and_api.py`: Verifies health endpoints, statutory schedules, and fee notes integrity.

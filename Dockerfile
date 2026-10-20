@@ -1,16 +1,22 @@
-# Multi-stage Docker build for Karani Law Vite/React Frontend
+# ==============================================================================
+# Multi-stage Production Dockerfile for Karani Law Vite/React Frontend
+# ==============================================================================
+
+# Stage 1: Build static distribution
 FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Build arguments for Supabase client configuration
-ARG VITE_SUPABASE_URL=https://hhkbypvdwikxdlwivmrn.supabase.co
-ARG VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhoa2J5cHZkd2lreGRsd2l2bXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0NTg2NTUsImV4cCI6MjEwNTAzNDY1NX0.WBtSdlFX-DFG_Rfaf_19GU7meTBSvDUTzkosft-hjlc
+# Injected at build time via CI/CD secrets or local .env
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_PUBLIC_APP_URL
 
-ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
-ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
+    VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY \
+    VITE_PUBLIC_APP_URL=$VITE_PUBLIC_APP_URL
 
-# Install dependencies with caching
+# Install dependencies with frozen lockfile
 COPY package*.json ./
 RUN npm ci
 
@@ -18,12 +24,20 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Stage 2: Serve with Nginx Alpine
+# Stage 2: High-performance Nginx Alpine web server
 FROM nginx:alpine
 
+# Remove default nginx HTML
+RUN rm -rf /usr/share/nginx/html/*
+
+# Copy compiled frontend from build stage
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
+
+# Healthcheck probe for Nginx web server
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:80/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

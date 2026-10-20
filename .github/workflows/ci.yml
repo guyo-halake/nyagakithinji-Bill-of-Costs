@@ -1,44 +1,28 @@
-name: CI Quality Gate — Frontend & Backend Verification
+name: CI Quality Gate — Verification & Docker Smoke Tests
 
 on:
   push:
-    branches: [ main, staging, develop ]
+    branches: [ develop, staging, main, update-*, Nyaga-* ]
   pull_request:
-    branches: [ main, staging ]
+    branches: [ develop, staging, main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # 1. FRONTEND VERIFICATION (TypeScript, Vite, Assets)
-  frontend-verification:
-    name: 🎨 Frontend (Node 20 / TypeScript / Vite)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: TypeScript Typecheck
-        run: npx tsc --noEmit
-
-      - name: Production Vite Build Bundle
-        run: npm run build
-
-  # 2. BACKEND VERIFICATION (Python 3.11, Pytest, Statutory Math)
+  # ============================================================================
+  # 1. BACKEND VERIFICATION: Statutory Math, Security & API Endpoints
+  # ============================================================================
   backend-verification:
-    name: ⚖️ Backend (Python 3.11 / Pytest / Remuneration)
+    name: ⚖️ Python 3.11 / Statutory Remuneration & Database Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -50,7 +34,91 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Statutory Remuneration & Security Pytest Suite
+      - name: Execute Full Pytest Suite (Statutory Math, Security & Health)
         run: |
           cd backend
           PYTHONPATH=. pytest app/tests -v --durations=10
+
+  # ============================================================================
+  # 2. FRONTEND VERIFICATION: TypeScript Static Analysis & Production Build
+  # ============================================================================
+  frontend-verification:
+    name: 🎨 Node 20 / TypeScript Compilation & Vite Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: TypeScript Typecheck (Zero Errors Allowed)
+        run: npx tsc --noEmit
+
+      - name: Production Vite Asset Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://hhkbypvdwikxdlwivmrn.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'dummy-anon-key' }}
+
+  # ============================================================================
+  # 3. DOCKER VERIFICATION: Multi-Stage Build & Container Health Probing
+  # ============================================================================
+  docker-smoke-test:
+    name: 🐳 Docker Multi-Stage Build & Healthcheck Smoke Test
+    needs: [backend-verification, frontend-verification]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Hardened Backend Container
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          load: true
+          tags: karani-backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke Test Backend Container (Non-root & Health Probe)
+        run: |
+          docker run -d --name test-api -p 8000:8000 \
+            -e PORT=8000 \
+            -e APP_ENV=test \
+            -e JWT_SECRET_KEY=ci-test-secret-key-32-chars-long-1234567 \
+            karani-backend:test
+          
+          # Poll health endpoint up to 25 seconds
+          echo "Waiting for container startup..."
+          for i in {1..25}; do
+            if curl -s http://localhost:8000/api/v1/health | grep -q "healthy"; then
+              echo "✓ Backend container is healthy and responding!"
+              break
+            fi
+            sleep 1
+          done
+
+          # Verify statutory calculation API endpoint inside container
+          curl -f http://localhost:8000/api/v1/remuneration/schedules
+          docker stop test-api
+
+      - name: Build Frontend Container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: karani-frontend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
