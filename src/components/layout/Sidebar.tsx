@@ -54,7 +54,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   onLogout
 }) => {
-  const [showNewActionMenu, setShowNewActionMenu] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [feeNotesCount, setFeeNotesCount] = useState<number>(() => getFeeNotes().length);
   const [, setPermissionTick] = useState(0);
@@ -71,7 +70,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return [];
   });
 
-  const actionMenuRef = useRef<HTMLDivElement>(null);
   const pinModalRef = useRef<HTMLDivElement>(null);
 
   const can = (code: string) => hasPermission(currentUser, code);
@@ -155,12 +153,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Close menus on outside click
+  // Close pin modal on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
-        setShowNewActionMenu(false);
-      }
       if (pinModalRef.current && !pinModalRef.current.contains(e.target as Node)) {
         setShowPinModal(false);
       }
@@ -201,7 +196,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleSelect = (id: string) => {
     setCurrentTab(id);
-    setShowNewActionMenu(false);
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
     }
@@ -228,7 +222,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'boc',
-      label: 'FN Builder',
+      label: 'Create Fee Note',
       icon: FileText,
       iconColor: 'text-blue-600 dark:text-blue-400',
       shortcut: 'Alt+3',
@@ -236,7 +230,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'matters',
-      label: 'Matters / Cases',
+      label: 'Matters',
       icon: Briefcase,
       iconColor: 'text-indigo-600 dark:text-indigo-400',
       shortcut: 'Alt+4',
@@ -252,7 +246,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'vault',
-      label: 'Document and Storage',
+      label: 'Documents',
       icon: FolderLock,
       iconColor: 'text-emerald-600 dark:text-emerald-400',
       shortcut: 'Alt+6',
@@ -260,52 +254,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'guide',
-      label: 'Remuneration Guide',
+      label: 'Scale Guide',
       icon: BookOpen,
       iconColor: 'text-purple-600 dark:text-purple-400',
       shortcut: 'Alt+7',
       permission: 'guide.view'
     },
-    /*
-    {
-      id: 'payments',
-      label: 'Payments & Billing',
-      icon: CreditCard,
-      iconColor: 'text-emerald-600 dark:text-emerald-400',
-      shortcut: 'Alt+8',
-      permission: 'feenotes.view'
-    },
-    {
-      id: 'messages',
-      label: 'Staff Chat & Messages',
-      icon: MessageSquare,
-      iconColor: 'text-cyan-600 dark:text-cyan-400',
-      shortcut: 'Alt+9'
-    }
-    */
   ];
 
-  // Controls Navigation (Executive Hub has NO icon as requested)
+  // Controls Navigation
   const controlNavItems = [
-    /*
-    {
-      id: 'managing_hub',
-      label: 'Executive Hub',
-      icon: null, // User explicitly requested: "rmoe the icon friom eectivee hub"
-      permission: 'managing_hub.view',
-      adminOnly: true
-    },
-    */
     {
       id: 'settings',
-      label: 'Business Settings',
+      label: 'Settings',
       icon: Settings,
       iconColor: 'text-slate-600 dark:text-slate-400',
       permission: 'settings.view'
     },
     {
       id: 'permissions',
-      label: 'Permission and Templates',
+      label: 'Permissions',
       icon: Lock,
       iconColor: 'text-rose-600 dark:text-rose-400',
       permission: 'permissions.view',
@@ -313,7 +281,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'support',
-      label: 'IT Helpdesk and Support',
+      label: 'Support',
       icon: HelpCircle,
       iconColor: 'text-cyan-600 dark:text-cyan-400',
       permission: 'support.view'
@@ -384,72 +352,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <X className="w-4 h-4" />
             </button>
-          </div>
-
-          {/* "+ New Action" Omni Dropdown Button */}
-          <div className="relative" ref={actionMenuRef}>
-            <button
-              onClick={() => setShowNewActionMenu(!showNewActionMenu)}
-              className="w-full flex items-center justify-between py-2 px-3 rounded-lg font-semibold text-xs bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-all shadow-xs cursor-pointer"
-              title="Create New Action"
-            >
-              <div className="flex items-center gap-2">
-                <Plus className="w-4 h-4 shrink-0" />
-                <span>New Action</span>
-              </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-            </button>
-
-            {/* Floating Omni-Create Action Menu */}
-            {showNewActionMenu && (
-              <div className="absolute top-full left-0 mt-2 w-56 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 p-1.5 space-y-0.5 text-xs">
-                <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Quick Actions
-                </div>
-                <button
-                  onClick={() => handleSelect('feenotes')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors"
-                >
-                  <FilePlus className="w-4 h-4 text-amber-500" />
-                  <span>New Fee Note</span>
-                </button>
-                <button
-                  onClick={() => handleSelect('boc')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors"
-                >
-                  <FileText className="w-4 h-4 text-blue-500" />
-                  <span>New FN / Bill of Costs</span>
-                </button>
-                <button
-                  onClick={() => handleSelect('matters')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors"
-                >
-                  <Briefcase className="w-4 h-4 text-indigo-500" />
-                  <span>New Matter / Case</span>
-                </button>
-                <button
-                  onClick={() => handleSelect('clients')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors"
-                >
-                  <UserPlus className="w-4 h-4 text-teal-500" />
-                  <span>New Client Entity</span>
-                </button>
-                <button
-                  onClick={() => handleSelect('vault')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors"
-                >
-                  <UploadCloud className="w-4 h-4 text-emerald-500" />
-                  <span>Upload Document</span>
-                </button>
-                <button
-                  onClick={() => handleSelect('guide')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors"
-                >
-                  <Calculator className="w-4 h-4 text-purple-500" />
-                  <span>Statutory Scale Calculator</span>
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Primary Operations Navigation Section */}
@@ -527,7 +429,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Plus className="w-3.5 h-3.5 text-slate-400" />
               </button>
             ) : (
-              pinnedItems.map(item => (
+              pinnedItems.slice(0, 4).map(item => (
                 <div
                   key={item.id}
                   onClick={() => {
@@ -620,8 +522,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Minimalist Professional Footer */}
         <div className="p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-center font-['Sora'] text-[10px] text-slate-400">
-          <span className="font-semibold text-slate-600 dark:text-slate-300">FNB V1.3 Legal Engine</span>
-          <span className="block text-[9px] text-slate-400">Advocates of the High Court of Kenya</span>
+          <span className="font-semibold text-slate-700 dark:text-slate-200">FNB v1.3</span>
+          <span className="block text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">Maintained by P3L Developers</span>
         </div>
       </aside>
 

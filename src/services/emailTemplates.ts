@@ -24,7 +24,7 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
       fullName: 'Victor Karani',
       username: 'vickarani',
       portalUrl: 'http://localhost:3000',
-      toEmail: 'vickarani@gmail.com',
+      toEmail: 'alexkaranivic@gmail.com',
       temporaryPassword: 'Nyagah@2026',
       roleTitle: 'Senior Advocate & Practice Lead'
     },
@@ -391,7 +391,7 @@ This email was automated by P3L Helpdesk Delivery System. Please do not reply.`,
       greeting: 'Good afternoon Guyo',
       userId: 'usr_vickarani_002',
       username: 'vickarani',
-      emailAddress: 'vickarani@gmail.com',
+      emailAddress: 'alexkaranivic@gmail.com',
       role: 'Senior Partner & Remuneration Lead',
       timestamp: '16 Oct 2026, 12:40 PM',
       resetActionUrl: 'https://kithinjiandco.vercel.app'

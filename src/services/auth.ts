@@ -175,11 +175,16 @@ export async function signInWithPassword(identifier: string, password: string): 
     // Check localStorage user store
     const stored = localStorage.getItem('EXACT_USERS');
     let userList: SystemUser[] = stored ? JSON.parse(stored) : [];
+    const obsoleteIds = new Set(['usr-faith-chebet', 'usr-brian-omondi', 'usr-mercy-wanjiku', 'usr-kevin-mutua', 'usr-karani-admin']);
+    userList = userList.filter(u => !obsoleteIds.has(u.id));
     
     // Also include SEEDED_USERS
     const { SEEDED_USERS } = await import('./supabase');
     SEEDED_USERS.forEach(su => {
-      if (!userList.some(u => u.id === su.id || u.workEmail?.toLowerCase() === su.workEmail.toLowerCase())) {
+      const idx = userList.findIndex(u => u.id === su.id || u.workEmail?.toLowerCase() === su.workEmail.toLowerCase());
+      if (idx !== -1) {
+        userList[idx] = { ...su, ...userList[idx], workEmail: su.workEmail, phonePrimary: su.phonePrimary, role: su.role, passwordHash: su.passwordHash || userList[idx].passwordHash };
+      } else {
         userList.push(su);
       }
     });

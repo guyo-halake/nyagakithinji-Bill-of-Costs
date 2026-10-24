@@ -32,7 +32,8 @@ import {
   CheckSquare,
   Square,
   RefreshCw,
-  SendHorizontal
+  SendHorizontal,
+  Lock
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
@@ -93,6 +94,28 @@ export const FeeNotesListView: React.FC<FeeNotesListViewProps> = ({
     setSuccessToast(msg);
     setTimeout(() => setSuccessToast(''), 3500);
   };
+
+  const [visibilityScope, setVisibilityScope] = useState<'all' | 'self'>(() => {
+    return (localStorage.getItem('FEE_NOTES_VISIBILITY_SCOPE') as 'all' | 'self') || 'all';
+  });
+
+  const isManagerOrAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Developer' || currentUser?.hasAllPermissions;
+
+  useEffect(() => {
+    const handleScope = (e: any) => {
+      if (e?.detail) setVisibilityScope(e.detail);
+      else {
+        const s = (localStorage.getItem('FEE_NOTES_VISIBILITY_SCOPE') as 'all' | 'self') || 'all';
+        setVisibilityScope(s);
+      }
+    };
+    window.addEventListener('feeNotesVisibilityChanged', handleScope);
+    window.addEventListener('storage', handleScope);
+    return () => {
+      window.removeEventListener('feeNotesVisibilityChanged', handleScope);
+      window.removeEventListener('storage', handleScope);
+    };
+  }, []);
 
   useEffect(() => {
     const loadFeeNotes = () => {
@@ -373,7 +396,25 @@ Kindly contact our registry for any inquiries.`;
 
   // Filter calculations
   const filteredFeeNotes = useMemo(() => {
+    const userFullName = (currentUser?.fullName || '').toLowerCase().trim();
+    const userEmail = (currentUser?.workEmail || '').toLowerCase().trim();
+    const userTitle = (currentUser?.advocateTitle || '').toLowerCase().trim();
+
     return feeNotesList.filter((fn) => {
+      // If visibility scope is 'self' and logged-in user is an advocate, only show their own fee notes
+      if (visibilityScope === 'self' && !isManagerOrAdmin) {
+        const genBy = (fn.generatedByUser || '').toLowerCase();
+        const genEmail = ((fn as any).generatedByEmail || '').toLowerCase();
+        const genId = (fn as any).userId;
+
+        const isMine = (userFullName && genBy.includes(userFullName)) ||
+                       (userTitle && genBy.includes(userTitle)) ||
+                       (userEmail && genEmail === userEmail) ||
+                       (currentUser?.id && genId === currentUser.id);
+
+        if (!isMine) return false;
+      }
+
       const matchesStatus = filterStatus === 'all' || fn.status === filterStatus;
       const s = (fn.courtSchedule || '').toLowerCase();
       const matchesSchedule =
@@ -392,7 +433,7 @@ Kindly contact our registry for any inquiries.`;
 
       return matchesStatus && matchesSchedule && matchesQuery;
     });
-  }, [feeNotesList, filterStatus, scheduleFilter, searchQuery]);
+  }, [feeNotesList, filterStatus, scheduleFilter, searchQuery, visibilityScope, isManagerOrAdmin, currentUser]);
 
   // Aggregate Metrics
   const totalValue = feeNotesList.reduce((sum, fn) => sum + fn.grandTotal, 0);
@@ -458,7 +499,7 @@ Kindly contact our registry for any inquiries.`;
   };
 
   return (
-    <div className="space-y-6 pb-20 font-sans">
+    <div className="space-y-4 pb-12 font-sans">
       
       {/* Toast Notification */}
       {successToast && (
@@ -468,25 +509,70 @@ Kindly contact our registry for any inquiries.`;
         </div>
       )}
 
-      {/* Header Banner - Clean, Minimalist, Elegant */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-2 border-b border-[var(--border-color)] pb-4">
+      {/* Header Banner - Clean, Minimalist, Compact */}
+      <div className="pt-1 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)]/60 pb-3">
         <div>
-          <h1 className="font-brand font-bold text-2xl text-[var(--text-main)] tracking-tight flex items-center gap-2">
-            <Scale className="w-5 h-5 text-slate-700 dark:text-zinc-300" /> Saved Fee Notes & Bills of Costs
+          <h1 className="font-brand font-bold text-xl sm:text-2xl text-[var(--text-main)] tracking-tight flex items-center gap-2">
+            <Scale className="w-5 h-5 text-slate-700 dark:text-zinc-300" /> Fee Notes &amp; Bills of Costs
           </h1>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Database ledger of all taxed, issued, and draft bills under the Advocates (Remuneration) Order
+          <p className="text-xs text-[var(--text-muted)] mt-0.5 font-sans">
+            Ledger of taxed, issued, and draft bills under the Advocates (Remuneration) Order
           </p>
         </div>
 
-        {can('boc.view') && (
-          <button
-            onClick={() => onNavigateTab('boc')}
-            className="px-4 py-2 bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
-          >
-            <Plus className="w-4 h-4" /> New Bill of Costs
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {isManagerOrAdmin ? (
+            <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-zinc-800 rounded-xl border border-[var(--border-color)]">
+              <button
+                type="button"
+                onClick={() => {
+                  setVisibilityScope('all');
+                  localStorage.setItem('FEE_NOTES_VISIBILITY_SCOPE', 'all');
+                  window.dispatchEvent(new CustomEvent('feeNotesVisibilityChanged', { detail: 'all' }));
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  visibilityScope === 'all'
+                    ? 'bg-blue-600 text-white shadow-xs font-bold'
+                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Policy: Advocates see the entire firm's fee notes ledger"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Allow All Fee Notes</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVisibilityScope('self');
+                  localStorage.setItem('FEE_NOTES_VISIBILITY_SCOPE', 'self');
+                  window.dispatchEvent(new CustomEvent('feeNotesVisibilityChanged', { detail: 'self' }));
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  visibilityScope === 'self'
+                    ? 'bg-amber-600 text-white shadow-xs font-bold'
+                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Policy: Advocates only see fee notes they drafted themselves"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Allow Self Only</span>
+              </button>
+            </div>
+          ) : visibilityScope === 'self' && (
+            <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5" /> Showing Self Fee Notes Only
+            </span>
+          )}
+
+          {can('boc.view') && (
+            <button
+              onClick={() => onNavigateTab('boc')}
+              className="px-4 py-2 bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" /> Create Fee Note
+            </button>
+          )}
+        </div>
       </div>
 
       {/* MINIMALIST SUMMARY STATS (Clean, Slate, Monochrome, No Rainbow) */}

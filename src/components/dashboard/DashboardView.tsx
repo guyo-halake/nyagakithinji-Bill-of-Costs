@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Clock,
   CheckCircle2,
@@ -54,9 +54,19 @@ import {
   Settings,
   Search,
   RefreshCw,
-  Table
+  Table,
+  ChevronLeft,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Flame,
+  Wallet,
+  AlertOctagon
 } from 'lucide-react';
 import { ITTicketRecord, DEFAULT_ADVOCATE_TICKETS } from '../support/TechSupportView';
+import { AdvocateWipLeaderboard } from './AdvocateWipLeaderboard';
+import { ClientRetainerEscrowWidget } from './ClientRetainerEscrowWidget';
+import { ExecutiveTabbedTables } from './ExecutiveTabbedTables';
 
 import {
   SystemUser,
@@ -82,7 +92,13 @@ import {
   getDeletedUserKeys,
   isUserRecordDeleted
 } from '../../services/data';
-import { getActivityLogs, logSystemActivity, ActivityLogItem } from '../../services/activityLogger';
+import {
+  getActivityLogs,
+  logSystemActivity,
+  ActivityLogItem,
+  fetchRemoteActivityLogs,
+  subscribeToActivityLogs
+} from '../../services/activityLogger';
 import { sendEmail, sendWelcomeUserEmail } from '../../services/email';
 import {
   RoleTemplate,
@@ -179,6 +195,180 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [roleDropdownUser, setRoleDropdownUser] = useState<string | null>(null);
   const [userActionMenuId, setUserActionMenuId] = useState<string | null>(null);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
+
+  // Enterprise Table Controls (Universal Search, Faceted Filtering, Sorting & Pagination)
+  const [tableSearch, setTableSearch] = useState('');
+  const [tableStatusFilter, setTableStatusFilter] = useState('all');
+  const [tableSortColumn, setTableSortColumn] = useState<string>('default');
+  const [tableSortDirection, setTableSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [tableCurrentPage, setTableCurrentPage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(10);
+  const [showAllMattersForAdvocate, setShowAllMattersForAdvocate] = useState(false);
+
+  const handleExecutiveTabSwitch = (tab: 'bills' | 'matters' | 'users_permissions' | 'clients') => {
+    setExecutiveActiveTab(tab);
+    setTableSearch('');
+    setTableStatusFilter('all');
+    setTableSortColumn('default');
+    setTableSortDirection('desc');
+    setTableCurrentPage(1);
+  };
+
+  const handleTableSort = (columnKey: string) => {
+    if (tableSortColumn === columnKey) {
+      setTableSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setTableSortColumn(columnKey);
+      setTableSortDirection('desc');
+    }
+    setTableCurrentPage(1);
+  };
+
+  // 1. Filtered & Sorted Bills
+  const processedBills = useMemo(() => {
+    let result = [...feeNotes];
+    const q = tableSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter(n =>
+        (n.billNumber || '').toLowerCase().includes(q) ||
+        (n.matterTitle || '').toLowerCase().includes(q) ||
+        (n.clientName || '').toLowerCase().includes(q) ||
+        (n.generatedByUser || '').toLowerCase().includes(q) ||
+        (n.courtSchedule || '').toLowerCase().includes(q)
+      );
+    }
+    if (tableStatusFilter !== 'all') {
+      result = result.filter(n => n.status === tableStatusFilter);
+    }
+    if (tableSortColumn !== 'default') {
+      result.sort((a, b) => {
+        let valA: any = (a as any)[tableSortColumn];
+        let valB: any = (b as any)[tableSortColumn];
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return tableSortDirection === 'asc' ? valA - valB : valB - valA;
+        }
+        valA = String(valA || '').toLowerCase();
+        valB = String(valB || '').toLowerCase();
+        return tableSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
+    }
+    return result;
+  }, [feeNotes, tableSearch, tableStatusFilter, tableSortColumn, tableSortDirection]);
+
+  // 2. Filtered & Sorted Matters
+  const processedMatters = useMemo(() => {
+    let result = [...matters];
+    const q = tableSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter(m =>
+        (m.caseNo || '').toLowerCase().includes(q) ||
+        (m.title || '').toLowerCase().includes(q) ||
+        (m.applicant || '').toLowerCase().includes(q) ||
+        (m.respondent || '').toLowerCase().includes(q) ||
+        (m.forum || '').toLowerCase().includes(q) ||
+        (m.leadAdvocate || '').toLowerCase().includes(q)
+      );
+    }
+    if (tableStatusFilter !== 'all') {
+      result = result.filter(m =>
+        (m.status || '').toLowerCase().includes(tableStatusFilter.toLowerCase()) ||
+        (m.forum || '').toLowerCase().includes(tableStatusFilter.toLowerCase())
+      );
+    }
+    if (tableSortColumn !== 'default') {
+      result.sort((a, b) => {
+        let valA: any = (a as any)[tableSortColumn];
+        let valB: any = (b as any)[tableSortColumn];
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return tableSortDirection === 'asc' ? valA - valB : valB - valA;
+        }
+        valA = String(valA || '').toLowerCase();
+        valB = String(valB || '').toLowerCase();
+        return tableSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
+    }
+    return result;
+  }, [matters, tableSearch, tableStatusFilter, tableSortColumn, tableSortDirection]);
+
+  // 3. Filtered & Sorted Users
+  const processedUsers = useMemo(() => {
+    let result = [...users];
+    const q = tableSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter(u =>
+        (u.fullName || '').toLowerCase().includes(q) ||
+        (u.workEmail || '').toLowerCase().includes(q) ||
+        (u.position || '').toLowerCase().includes(q) ||
+        (u.department || '').toLowerCase().includes(q) ||
+        (u.lskNo || '').toLowerCase().includes(q)
+      );
+    }
+    if (tableStatusFilter !== 'all') {
+      result = result.filter(u => u.role === tableStatusFilter);
+    }
+    if (tableSortColumn !== 'default') {
+      result.sort((a, b) => {
+        let valA: any = (a as any)[tableSortColumn];
+        let valB: any = (b as any)[tableSortColumn];
+        valA = String(valA || '').toLowerCase();
+        valB = String(valB || '').toLowerCase();
+        return tableSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
+    }
+    return result;
+  }, [users, tableSearch, tableStatusFilter, tableSortColumn, tableSortDirection]);
+
+  // 4. Filtered & Sorted Clients
+  const processedClients = useMemo(() => {
+    let result = [...clients];
+    const q = tableSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter(c =>
+        (c.name || '').toLowerCase().includes(q) ||
+        (c.company || '').toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.code || '').toLowerCase().includes(q) ||
+        (c.kraPin || '').toLowerCase().includes(q)
+      );
+    }
+    if (tableStatusFilter !== 'all') {
+      result = result.filter(c => c.category === tableStatusFilter);
+    }
+    if (tableSortColumn !== 'default') {
+      result.sort((a, b) => {
+        let valA: any = (a as any)[tableSortColumn];
+        let valB: any = (b as any)[tableSortColumn];
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return tableSortDirection === 'asc' ? valA - valB : valB - valA;
+        }
+        valA = String(valA || '').toLowerCase();
+        valB = String(valB || '').toLowerCase();
+        return tableSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
+    }
+    return result;
+  }, [clients, tableSearch, tableStatusFilter, tableSortColumn, tableSortDirection]);
+
+  // Active Tab Paged Slices
+  const paginatedBills = useMemo(() => {
+    const start = (tableCurrentPage - 1) * tablePageSize;
+    return processedBills.slice(start, start + tablePageSize);
+  }, [processedBills, tableCurrentPage, tablePageSize]);
+
+  const paginatedMatters = useMemo(() => {
+    const start = (tableCurrentPage - 1) * tablePageSize;
+    return processedMatters.slice(start, start + tablePageSize);
+  }, [processedMatters, tableCurrentPage, tablePageSize]);
+
+  const paginatedUsers = useMemo(() => {
+    const start = (tableCurrentPage - 1) * tablePageSize;
+    return processedUsers.slice(start, start + tablePageSize);
+  }, [processedUsers, tableCurrentPage, tablePageSize]);
+
+  const paginatedClients = useMemo(() => {
+    const start = (tableCurrentPage - 1) * tablePageSize;
+    return processedClients.slice(start, start + tablePageSize);
+  }, [processedClients, tableCurrentPage, tablePageSize]);
 
   // Matter Table Checkbox Selection State
   const [selectedMatterIds, setSelectedMatterIds] = useState<string[]>([]);
@@ -312,6 +502,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     void loadExecutiveData();
 
+    // Fetch remote audit logs from Supabase PostgreSQL public.admin_audit_logs
+    fetchRemoteActivityLogs().then(remoteLogs => {
+      if (remoteLogs && remoteLogs.length > 0) {
+        setActivityLogs(remoteLogs);
+      }
+    });
+
+    const unsubscribeRemoteLogs = subscribeToActivityLogs((updatedLogs) => {
+      setActivityLogs(updatedLogs);
+    });
+
     const refreshActivity = () => setActivityLogs(getActivityLogs());
     const handleStorageChange = (e: StorageEvent) => {
       refreshActivity();
@@ -334,6 +535,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     window.addEventListener('databaseRealtimeUpdate', handleRealtime);
 
     return () => {
+      unsubscribeRemoteLogs();
       window.removeEventListener('activityLogsUpdated', refreshActivity);
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('permissionsUpdated', loadExecutiveData);
@@ -3022,13 +3224,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       ) */}
 
-      {/* Welcome Header & Action Chips: Dropped down with generous spacing */}
-      <div className="pt-6 sm:pt-8 mb-8 sm:mb-10 flex flex-col md:flex-row md:items-center justify-between gap-5 pb-8 border-b border-[var(--border-color)]/60">
+      {/* Welcome Header & Action Chips: Clean & Compact */}
+      <div className="pt-1 sm:pt-2 mb-4 sm:mb-5 flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-[var(--border-color)]/60">
         <div className="shrink-0">
-          <h1 className="font-brand font-extrabold text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight">
+          <h1 className="font-brand font-extrabold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
             Good afternoon, {(currentUser?.fullName || userName || 'Guyo Halake').replace(/^Adv\.?\s+/i, '')}
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1 font-sans">
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-0.5 font-sans">
             Welcome to Nyagah B. Kithinji & Co. Advocates
           </p>
         </div>
@@ -3041,7 +3243,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             className="px-4 py-2 bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>New Bill of Costs</span>
+            <span>Create Fee Note</span>
             <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono font-normal rounded bg-slate-800 dark:bg-slate-200 text-slate-300 dark:text-slate-700">⌘N</kbd>
           </button>
 
@@ -3057,13 +3259,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>Import Excel</span>
           </button>
 
-          <button
-            onClick={() => onNavigateTab('clients')}
-            className="px-3.5 py-2 bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            <span>Add Client</span>
-          </button>
+          {isExecutive && (
+            <button
+              onClick={() => onNavigateTab('clients')}
+              className="px-3.5 py-2 bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>Add Client</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowBocCalc(prev => !prev)}
@@ -3077,14 +3281,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>{showBocCalc ? 'Hide Quick Fee Note' : 'Quick Fee Note'}</span>
           </button>
 
-          <button
-            onClick={() => onOpenRecents ? onOpenRecents() : onNavigateTab('vault')}
-            className="px-3.5 py-2 bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-            title="Open Draft Fee Notes & Recent Files"
-          >
-            <Clock className="w-4 h-4 text-amber-500" />
-            <span>Drafts & Vault</span>
-          </button>
+          {isExecutive && (
+            <button
+              onClick={() => onOpenRecents ? onOpenRecents() : onNavigateTab('vault')}
+              className="px-3.5 py-2 bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Open Draft Fee Notes & Recent Files"
+            >
+              <Clock className="w-4 h-4 text-amber-500" />
+              <span>Drafts & Vault</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -3275,91 +3481,191 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
 
             </div>
-          ) : (
-            /* Standard 3 Stat Cards for Regular Advocates */
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 lg:gap-6">
+          ) : (() => {
+            const advName = (currentUser?.fullName || '').toLowerCase();
+            const advEmail = (currentUser?.workEmail || '').toLowerCase();
 
-              <div
-                onClick={() => onNavigateTab('matters')}
-                className="modulix-card-interactive p-5 space-y-3 flex flex-col justify-between"
-              >
-                <div className="flex items-center justify-between text-slate-600 dark:text-zinc-400">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400">
-                      <Scale className="w-4 h-4" />
+            // Advocate's fee notes
+            const myFeeNotes = feeNotes.filter(fn => {
+              const gen = (fn.generatedByUser || '').toLowerCase();
+              return gen.includes(advName) || (fn.generatedByUserId && fn.generatedByUserId === currentUser?.id) || (advEmail && advEmail.includes(gen));
+            });
+
+            const myDraftNotes = myFeeNotes.filter(fn => fn.status === 'draft');
+            const myDraftExposure = myDraftNotes.reduce((acc, fn) => acc + (fn.grandTotal || 0), 0);
+            const mySubmittedNotes = myFeeNotes.filter(fn => fn.status === 'processed' && fn.approvalStatus === 'pending');
+            const myApprovedNotes = myFeeNotes.filter(fn => fn.status === 'processed' || fn.status === 'settled');
+            const myApprovedBilled = myApprovedNotes.reduce((acc, fn) => acc + (fn.grandTotal || 0), 0);
+
+            // Advocate's assigned matters
+            const myMatters = matters.filter(m => {
+              const lead = (m.leadAdvocate || '').toLowerCase();
+              const filed = (m.filedBy || '').toLowerCase();
+              const title = (m.title || '').toLowerCase();
+              if (advName.includes('nyagah')) {
+                return lead.includes('nyagah') || filed.includes('nyagah') || title.includes('zhenjian') || title.includes('eighty eight');
+              }
+              if (advName.includes('karani')) {
+                return lead.includes('karani') || filed.includes('karani') || title.includes('seyani');
+              }
+              return lead.includes(advName) || filed.includes(advName);
+            });
+
+            return (
+              <div className="space-y-6">
+                {/* 1. Overview Card */}
+                <div className="modulix-card p-5 border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-[var(--border-color)]/60">
+                    <div>
+                      <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white">
+                        Overview
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400">
+                        Real-time summary of your legal work and billing
+                      </p>
                     </div>
-                    <span className="text-xs font-bold font-sans text-slate-900 dark:text-white">Claim Overview</span>
                   </div>
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
+
+                  {/* 3 Simple Metric Blocks: Drafts, Approved, Submitted */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    {/* Drafts */}
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-1">
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Drafts</span>
+                      <p className="font-mono font-bold text-xl text-slate-900 dark:text-white">
+                        {myDraftNotes.length}
+                      </p>
+                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold truncate">
+                        KES {myDraftExposure > 0 ? (myDraftExposure / 1000000).toFixed(2) + 'M in progress' : '0.00'}
+                      </p>
+                    </div>
+
+                    {/* Approved Fee Notes */}
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-1">
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Approved Fee Notes</span>
+                      <p className="font-mono font-bold text-xl text-emerald-600 dark:text-emerald-400">
+                        {myApprovedNotes.length}
+                      </p>
+                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold truncate">
+                        KES {myApprovedBilled > 0 ? (myApprovedBilled / 1000000).toFixed(2) + 'M billed' : '0.00'}
+                      </p>
+                    </div>
+
+                    {/* Bills Submitted */}
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-1">
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Bills Submitted</span>
+                      <p className="font-mono font-bold text-xl text-slate-900 dark:text-white">
+                        {mySubmittedNotes.length}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {mySubmittedNotes.length > 0 ? 'Pending partner review' : 'No bills pending'}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-baseline justify-between pt-1">
-                  <div className="min-w-0">
-                    <p className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight truncate">
-                      KES {(totalPortfolioValue / 1000000).toFixed(1)}M
-                    </p>
-                    <p className="text-[11px] font-bold text-blue-600 dark:text-blue-400 mt-1">
-                      {totalMattersCount} Active Causes
-                    </p>
+                {/* 2. Assigned Matters Table (Fitted cleanly right under Overview) */}
+                <div className="modulix-card p-0 overflow-hidden border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs">
+                  <div className="p-4 sm:p-5 flex items-center justify-between border-b border-[var(--border-color)]/70">
+                    <div>
+                      <h3 className="font-brand font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                        Assigned Matters
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400">
+                        {myMatters.length} {myMatters.length === 1 ? 'matter' : 'matters'} assigned to you
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => onNavigateTab('matters')}
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <span>All Matters</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="modulix-table-header text-[11px]">
+                          <th className="py-2.5 px-4 font-semibold text-slate-500">Case Number</th>
+                          <th className="py-2.5 px-4 font-semibold text-slate-500">Client / Title</th>
+                          <th className="py-2.5 px-4 font-semibold text-slate-500">Claim Amount</th>
+                          <th className="py-2.5 px-4 font-semibold text-slate-500">Status</th>
+                          <th className="py-2.5 px-4 font-semibold text-slate-500 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border-color)]/60 text-xs">
+                        {myMatters.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
+                              No matters currently assigned to you.
+                            </td>
+                          </tr>
+                        ) : (
+                          myMatters.map((m) => (
+                            <tr
+                              key={m.id}
+                              onClick={() => handleViewMatter(m.id)}
+                              className="hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+                            >
+                              <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
+                                {m.caseNo}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className="font-semibold text-slate-800 dark:text-zinc-200 block truncate max-w-[200px]" title={m.title}>
+                                  {m.title}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono block truncate max-w-[200px]">
+                                  {resolveFuzzyClient(m.applicant || m.title)}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-mono font-semibold text-slate-900 dark:text-blue-400">
+                                KES {m.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  m.statusClass === 'ready'
+                                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                                    : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20'
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${m.statusClass === 'ready' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                                  {m.status}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (onNavigateToBuilder) {
+                                      onNavigateToBuilder({
+                                        matterId: m.id,
+                                        matterTitle: m.title,
+                                        clientName: resolveFuzzyClient(m.applicant || m.title),
+                                        claimValue: m.amount,
+                                        courtSchedule: m.forum || 'High Court of Kenya (Commercial & Tax Division)'
+                                      }, false);
+                                    } else {
+                                      onNavigateTab('boc');
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-[11px] transition-colors cursor-pointer shadow-2xs"
+                                  title="Draft Bill of Costs for this cause"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>Draft Bill</span>
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>
-
-              <div
-                onClick={() => onNavigateTab('matters')}
-                className="modulix-card-interactive p-5 space-y-3 flex flex-col justify-between"
-              >
-                <div className="flex items-center justify-between text-slate-600 dark:text-zinc-400">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400">
-                      <Clock className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold font-sans text-slate-900 dark:text-white">Pending Taxation</span>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
-                </div>
-
-                <div className="flex items-baseline justify-between pt-1">
-                  <div>
-                    <p className="text-3xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
-                      {pendingTaxationsCount}
-                    </p>
-                    <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      <span>Ready for Court</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                onClick={() => onNavigateTab('feenotes')}
-                className="modulix-card-interactive p-5 space-y-3 flex flex-col justify-between"
-              >
-                <div className="flex items-center justify-between text-slate-600 dark:text-zinc-400">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold font-sans text-slate-900 dark:text-white">Processed Fee Notes</span>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
-                </div>
-
-                <div className="flex items-baseline justify-between pt-1">
-                  <div>
-                    <p className="text-3xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
-                      {processedTodayCount}
-                    </p>
-                    <div className="flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 mt-1">
-                      <span>{untaxedDraftsCount} Untaxed / Drafts</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          )}
+            );
+          })()}
 
           {/* Quick Quote Estimator Widget (Interactive BOC Preview) */}
           {showBocCalc ? (() => {
@@ -3642,27 +3948,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               {/* Dynamic Real Activity Feed (Fee Notes, Users, Emails & Messages) */}
               {(() => {
-                const realLegalActivities = activityLogs.filter(log => {
+                // Filter out repeated profile updates and deduplicate
+                const seenActions = new Set<string>();
+                const cleanActivities = activityLogs.filter(log => {
                   const text = `${log.action || ''} ${log.actionDescription || ''}`.toLowerCase();
-                  const isFeeNote = text.includes('fee note') || text.includes('bill of cost') || text.includes('boc') || text.includes('billing');
-                  const isUser = text.includes('user') || text.includes('advocate');
-                  const isComm = text.includes('email') || text.includes('message') || text.includes('dispatch') || text.includes('invite');
-                  return isFeeNote || isUser || isComm;
+                  if (text.includes('coordinates and preferences')) return false;
+                  const key = `${log.advocateName}-${log.action}`;
+                  if (seenActions.has(key)) return false;
+                  seenActions.add(key);
+                  return true;
                 });
 
-                const displayList = showAllActivities ? realLegalActivities : realLegalActivities.slice(0, 6);
+                // Real firm actions from database fee notes & matters if feed is sparse
+                const finalActivities = [...cleanActivities];
+                if (finalActivities.length < 3) {
+                  feeNotes.forEach(fn => {
+                    const key = `${fn.generatedByUser}-feenote-${fn.billNumber}`;
+                    if (!seenActions.has(key)) {
+                      seenActions.add(key);
+                      finalActivities.push({
+                        id: `fn-${fn.id}`,
+                        advocateName: fn.generatedByUser || 'Firm Advocate',
+                        action: `${fn.status === 'processed' ? 'approved' : 'drafted'} ${fn.billNumber} (${fn.matterTitle})`,
+                        timeAgo: 'Recently',
+                        timestamp: fn.createdAt ? new Date(fn.createdAt).getTime() : Date.now(),
+                        type: 'feenote',
+                        badgeColor: fn.status === 'processed' ? 'bg-emerald-500' : 'bg-blue-500'
+                      });
+                    }
+                  });
+                }
+
+                const displayList = showAllActivities ? finalActivities : finalActivities.slice(0, 6);
 
                 return (
                   <>
                     <div className="relative pl-6 space-y-4 max-h-[520px] overflow-y-auto pr-1 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-zinc-800">
-                      {realLegalActivities.length === 0 ? (
+                      {displayList.length === 0 ? (
                         <div className="p-6 text-center text-slate-400 text-xs font-sans">
                           No recent activities recorded yet.
                         </div>
                       ) : (
                         displayList.map((log, idx) => {
                           const dotColor = log.badgeColor || (idx % 3 === 0 ? 'bg-emerald-500' : idx % 3 === 1 ? 'bg-blue-500' : 'bg-purple-500');
-                          const relativeTime = log.timeAgo || (idx === 0 ? '12 mins ago' : idx === 1 ? '1 hour ago' : idx === 2 ? '3 hours ago' : 'Yesterday 16:45');
+                          const relativeTime = log.timeAgo || 'Recently';
                           return (
                             <div key={log.id} className="relative group">
                               <div className={`absolute -left-6 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white dark:ring-zinc-900 ${dotColor}`} />
@@ -3681,661 +4010,135 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       )}
                     </div>
 
-                    {realLegalActivities.length > 6 && (
+                    {finalActivities.length > 6 && (
                       <button
                         onClick={() => setShowAllActivities(!showAllActivities)}
                         className="w-full py-1.5 text-[11px] font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white border border-[var(--border-color)] rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer text-center"
                       >
-                        {showAllActivities ? 'Show Less' : `Load More (${realLegalActivities.length - 6} more)`}
+                        {showAllActivities ? 'Show Less' : `Load More (${finalActivities.length - 6} more)`}
                       </button>
                     )}
                   </>
                 );
               })()}
             </div>
-          ) : (
-            <div className="modulix-card space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200/70">
-                <div>
-                  <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white">
-                    Fee Notes & Billing History
-                  </h3>
-                  <p className="text-[11px] text-slate-500">{feeNotes.length} fee notes recorded</p>
-                </div>
-                <button
-                  onClick={() => onNavigateTab('feenotes')}
-                  className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-                >
-                  View All →
-                </button>
-              </div>
+          ) : (() => {
+            const advName = (currentUser?.fullName || '').toLowerCase();
+            const advEmail = (currentUser?.workEmail || '').toLowerCase();
+            const myFeeNotes = feeNotes.filter(fn => {
+              const gen = (fn.generatedByUser || '').toLowerCase();
+              return gen.includes(advName) || (fn.generatedByUserId && fn.generatedByUserId === currentUser?.id) || (advEmail && advEmail.includes(gen));
+            });
 
-              <div className="space-y-3">
-                {feeNotes.length === 0 ? (
-                  <div className="p-6 text-center text-slate-400 text-xs">
-                    No fee notes registered yet.
+            return (
+              <div className="modulix-card p-5 border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[var(--border-color)]/60">
+                  <div>
+                    <h3 className="font-brand font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                      Fee Notes & Billing History
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">
+                      {myFeeNotes.length} {myFeeNotes.length === 1 ? 'fee note' : 'fee notes'} created by you
+                    </p>
                   </div>
-                ) : (
-                  feeNotes.slice(0, 8).map((fn) => (
-                    <div
-                      key={fn.id}
-                      onClick={() => onNavigateTab('feenotes')}
-                      className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-800/70 border border-slate-200/80 dark:border-zinc-700/80 hover:border-blue-500 transition-all cursor-pointer group flex items-start gap-3"
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-700 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-sm shrink-0 shadow-xs group-hover:border-blue-500 transition-colors">
-                        <FileText className="w-5 h-5" />
-                      </div>
+                  <button
+                    onClick={() => onNavigateTab('feenotes')}
+                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <span>View All</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
 
-                      <div className="min-w-0 flex-1">
+                <div className="space-y-2.5">
+                  {myFeeNotes.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-xs">
+                      No fee notes created yet.
+                    </div>
+                  ) : (
+                    myFeeNotes.slice(0, 6).map((fn) => (
+                      <div
+                        key={fn.id}
+                        onClick={() => onNavigateTab('feenotes')}
+                        className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)]/70 hover:border-blue-500/50 transition-all cursor-pointer group"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-xs font-bold text-slate-900 dark:text-white truncate group-hover:text-blue-600 transition-colors" title={fn.clientName || fn.matterTitle}>
                             {fn.clientName || fn.matterTitle}
                           </p>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${fn.status === 'processed'
-                              ? 'badge-green'
-                              : 'badge-blue'
-                            }`}>
-                            {fn.status === 'processed' ? 'Processed' : 'Draft'}
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
+                            fn.status === 'processed' || fn.status === 'settled'
+                              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {fn.status === 'processed' || fn.status === 'settled' ? 'Approved' : 'Draft'}
                           </span>
                         </div>
 
-                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 truncate font-mono">
-                          Ref: {fn.billNumber}
+                        <p className="text-[11px] text-slate-400 mt-0.5 truncate font-mono">
+                          {fn.billNumber}
                         </p>
 
-                        <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200/60 dark:border-zinc-700/60 text-[10.5px]">
-                          <span className="font-mono font-bold text-slate-900 dark:text-blue-400">
+                        <div className="flex items-center justify-between pt-2 mt-2 border-t border-[var(--border-color)]/50 text-[11px]">
+                          <span className="font-mono font-bold text-slate-900 dark:text-white">
                             KES {(fn.grandTotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                           </span>
-                          <span className="text-slate-400 font-mono">
+                          <span className="text-slate-400 text-[10px]">
                             {fn.createdAt ? fn.createdAt.split('T')[0] : 'Recent'}
                           </span>
                         </div>
                       </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
 
       </div>
 
-      {/* FULL WIDTH EXECUTIVE TABLES & MATTERS (Spans 100% full width with zero dead space on the right) */}
-      <div className="w-full mt-6 lg:mt-8">
-        {/* Center Main Section: Executive Hub (Bills of Costs, Active Matters, Users & Permissions, Clients) */}
-        {isExecutive ? (
-          <div className="modulix-card p-0 overflow-hidden border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs">
+      {/* FULL WIDTH EXECUTIVE TABLES & MATTERS */}
+      {isExecutive && (
+        <div className="w-full mt-6 lg:mt-8">
+          <div className="space-y-6">
+            {/* Minimalist 2-Column Grid: Advocate Workload & Client Accounts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <AdvocateWipLeaderboard
+                users={users}
+                matters={matters}
+                feeNotes={feeNotes}
+                onNavigateTab={onNavigateTab}
+                onNavigateToBuilder={onNavigateToBuilder}
+              />
 
-              {/* Header Title Bar */}
-              <div className="px-5 pt-4 pb-3 border-b border-[var(--border-color)]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white">
-                    {executiveActiveTab === 'bills' ? 'Bills of Costs' : executiveActiveTab === 'matters' ? 'Active Matters' : executiveActiveTab === 'users_permissions' ? 'Users & Permissions' : 'Client Accounts'}
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                    {executiveActiveTab === 'bills' ? 'Fee notes and statutory taxation records' : executiveActiveTab === 'matters' ? 'Active causes and client court briefs' : executiveActiveTab === 'users_permissions' ? 'Firm members and assigned access rights' : 'Registered clients and active files'}
-                  </p>
-                </div>
-              </div>
-
-              {/* iOS / iPhone Style Minimalist Segmented Pill Navigation Bar */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[var(--border-color)] px-5 py-3 bg-[var(--bg-subtle)]/60 gap-3">
-
-                {/* Segmented Control Pill Group */}
-                <div className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-zinc-800 border border-[var(--border-color)]/50 shrink-0">
-                  {[
-                    { id: 'bills' as const, label: 'Bills of Costs', count: feeNotes.length },
-                    { id: 'matters' as const, label: 'Active Matters', count: matters.length },
-                    { id: 'users_permissions' as const, label: 'Users & Permissions', count: users.length },
-                    { id: 'clients' as const, label: 'Client Accounts', count: clients.length },
-                  ].map(tab => {
-                    const isActive = executiveActiveTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        onClick={() => setExecutiveActiveTab(tab.id)}
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${isActive
-                            ? 'bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-xs font-bold'
-                            : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                          }`}
-                      >
-                        <span>{tab.label}</span>
-                        <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${isActive
-                            ? 'bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-white font-bold'
-                            : 'bg-slate-300/50 dark:bg-zinc-700/50 text-slate-600 dark:text-zinc-400'
-                          }`}>
-                          {tab.count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {executiveActiveTab === 'users_permissions' && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={handleOpenAddUserModal}
-                      className="px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add New User</span>
-                    </button>
-                    <button
-                      onClick={() => onNavigateTab('permissions')}
-                      className="px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      <span>Permissions Studio</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* TAB 1: BILLS OF COSTS REGISTER */}
-              {executiveActiveTab === 'bills' && (
-                <div className="divide-y divide-[var(--border-color)]/60">
-                  {feeNotes.length === 0 ? (
-                    <div className="text-center py-12 text-slate-400 text-xs">
-                      No fee notes registered in the firm database.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto w-full">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="h-[42px] border-b border-[var(--border-color)] text-[11px] font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider bg-[var(--bg-subtle)]">
-                            <th className="py-3.5 px-4 font-mono">Bill Number</th>
-                            <th className="py-3.5 px-4">Matter & Client</th>
-                            <th className="py-3.5 px-4">Advocate</th>
-                            <th className="py-3.5 px-4">Court / Schedule</th>
-                            <th className="py-3.5 px-4 text-right">Grand Total (KES)</th>
-                            <th className="py-3.5 px-4 text-center">Status</th>
-                            <th className="py-3.5 px-4 text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[var(--border-color)]/60 font-sans">
-                          {feeNotes.map((note) => {
-                            const isProcessed = note.status === 'processed';
-                            const isExpanded = expandedNoteId === note.id;
-
-                            return (
-                              <React.Fragment key={note.id}>
-                                <tr className="hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-colors">
-                                  <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white">
-                                    {note.billNumber}
-                                  </td>
-                                  <td className="py-3.5 px-4 max-w-xs">
-                                    <span className="font-semibold text-slate-900 dark:text-white block truncate" title={note.matterTitle}>
-                                      {note.matterTitle}
-                                    </span>
-                                    <span className="text-[11px] text-slate-500 block truncate">
-                                      {note.clientName}
-                                    </span>
-                                  </td>
-                                  <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600 dark:text-zinc-300">
-                                    {note.generatedByUser}
-                                  </td>
-                                  <td className="py-3.5 px-4 text-[11px] text-slate-500">
-                                    {note.courtSchedule}
-                                  </td>
-                                  <td className="py-3.5 px-4 font-mono font-bold text-right text-slate-900 dark:text-white">
-                                    {note.grandTotal.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                                  </td>
-                                  <td className="py-3.5 px-4 text-center">
-                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold capitalize ${isProcessed
-                                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                                        : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
-                                      }`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${isProcessed ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                                      {note.status}
-                                    </span>
-                                  </td>
-                                  <td className="py-3.5 px-4 text-right">
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      <button
-                                        onClick={() => setExpandedNoteId(isExpanded ? null : note.id)}
-                                        className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                                        title="View Item Breakdown"
-                                      >
-                                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                      </button>
-                                      <button
-                                        onClick={() => handleOpenNote(note)}
-                                        className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
-                                      >
-                                        <Eye className="w-3 h-3" />
-                                        <span>Open</span>
-                                      </button>
-                                      <button
-                                        onClick={() => handleToggleProcess(note.id, note.status)}
-                                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${isProcessed
-                                            ? 'bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-slate-800'
-                                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                                          }`}
-                                      >
-                                        <CheckCircle2 className="w-3 h-3" />
-                                        <span>{isProcessed ? 'Reopen' : 'Approve'}</span>
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-
-                                {/* Executive Mini-Ledger Expander */}
-                                {isExpanded && (() => {
-                                  const instr = note.instructionFee || 0;
-                                  const gup = note.gettingUpFee || 0;
-                                  const vat = Number(((instr + gup) * 0.16).toFixed(2));
-                                  const grand = note.grandTotal || (instr + gup + vat);
-
-                                  return (
-                                    <tr className="bg-[var(--bg-subtle)]/70">
-                                      <td colSpan={7} className="px-5 py-3">
-                                        <div className="p-4 bg-white dark:bg-zinc-900 border border-[var(--border-color)] rounded-2xl shadow-xs max-w-xl space-y-3">
-                                          <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
-                                            <span className="text-[11px] font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">
-                                              Executive Statutory Fee Breakdown
-                                            </span>
-                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                                              Taxation Ready
-                                            </span>
-                                          </div>
-                                          <div className="space-y-1.5 text-xs">
-                                            <div className="flex justify-between py-1 border-b border-[var(--border-color)]/40">
-                                              <span className="text-slate-600 dark:text-zinc-400 font-medium">Item 1: Instruction Fee</span>
-                                              <span className="font-mono font-semibold text-slate-900 dark:text-white">KES {instr.toLocaleString('en-KE', { minimumFractionDigits: 2 })}</span>
-                                            </div>
-                                            <div className="flex justify-between py-1 border-b border-[var(--border-color)]/40">
-                                              <span className="text-slate-600 dark:text-zinc-400 font-medium">Item 2: Getting-Up Fee (Defended)</span>
-                                              <span className="font-mono font-semibold text-slate-900 dark:text-white">KES {gup.toLocaleString('en-KE', { minimumFractionDigits: 2 })}</span>
-                                            </div>
-                                            <div className="flex justify-between py-1 border-b border-[var(--border-color)]/40">
-                                              <span className="text-slate-600 dark:text-zinc-400 font-medium">VAT (16% on Professional Fees)</span>
-                                              <span className="font-mono font-semibold text-slate-900 dark:text-white">KES {vat.toLocaleString('en-KE', { minimumFractionDigits: 2 })}</span>
-                                            </div>
-                                            <div className="flex justify-between py-1.5 font-bold text-sm pt-2">
-                                              <span className="text-slate-900 dark:text-white">Grand Total</span>
-                                              <span className="font-mono text-emerald-600 dark:text-emerald-400 font-extrabold">KES {grand.toLocaleString('en-KE', { minimumFractionDigits: 2 })}</span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })()}
-                              </React.Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB: ACTIVE MATTERS */}
-              {executiveActiveTab === 'matters' && (
-                <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-[var(--border-color)] text-[11px] font-mono font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider bg-[var(--bg-subtle)]">
-                        <th className="py-4 px-6 min-w-[160px]">Cause / Matter ID</th>
-                        <th className="py-4 px-6 min-w-[240px]">Matter Title & Parties</th>
-                        <th className="py-4 px-6 min-w-[180px]">Court / Forum</th>
-                        <th className="py-4 px-6 min-w-[140px]">Claim Amount</th>
-                        <th className="py-4 px-6 min-w-[120px]">Status</th>
-                        <th className="py-4 px-6 min-w-[140px] text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border-color)]/60 font-sans">
-                      {matters.map((m) => (
-                        <tr key={m.id} className="hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-colors">
-                          <td className="py-4 px-6 font-mono font-bold text-slate-900 dark:text-white">
-                            {m.caseNo || m.id}
-                          </td>
-                          <td className="py-4 px-6">
-                            <span className="font-bold text-slate-900 dark:text-white block">{m.title}</span>
-                            <span className="text-[11px] text-slate-500 font-sans">{m.applicant} v. {m.respondent}</span>
-                          </td>
-                          <td className="py-4 px-6 text-slate-600 dark:text-zinc-400 font-sans">
-                            {m.forum}
-                          </td>
-                          <td className="py-4 px-6 font-mono font-bold text-slate-900 dark:text-blue-400">
-                            KES {(m.amount || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-6">
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                              {m.status || 'Active'}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => handleViewMatter(m.id)}
-                              className="px-3 py-1.5 text-xs font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-xl transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>View Matter</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* TAB 2: USERS & PERMISSIONS */}
-              {executiveActiveTab === 'users_permissions' && (
-                <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-[var(--border-color)] text-[11px] font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider bg-[var(--bg-subtle)] h-[42px]">
-                        <th className="py-3.5 px-4 min-w-[200px]">User</th>
-                        <th className="py-3.5 px-4 min-w-[200px]">Contact</th>
-                        <th className="py-3.5 px-4 min-w-[240px]">Role & Access</th>
-                        <th className="py-3.5 px-4 min-w-[240px] text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border-color)]/60 font-sans">
-                      {users.map((user) => {
-                        const roleCode = userRoleMap[user.id] || (user.role === 'Developer' ? 'developer_sys_admin' : user.role === 'Admin' ? 'managing_partner_exec' : 'senior_advocates_lawyers');
-                        const tpl = roleTemplates.find(t => t.code === roleCode) || roleTemplates[0];
-                        const initials = user.fullName.split(' ').filter(Boolean).map(n => n[0]).slice(0, 2).join('').toUpperCase();
-                        const isFullAccess = roleCode === 'developer_sys_admin' || roleCode === 'managing_partner_exec';
-
-                        return (
-                          <tr key={user.id} className="hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-colors">
-                            {/* 1. User Column */}
-                            <td className="py-3.5 px-4">
-                              <div className="flex items-center gap-3">
-                                {user.avatarUrl ? (
-                                  <img
-                                    src={user.avatarUrl}
-                                    alt={user.fullName}
-                                    className="w-8 h-8 rounded-lg object-cover border border-[var(--border-color)] shrink-0 shadow-2xs"
-                                  />
-                                ) : (
-                                  <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] shrink-0 shadow-2xs">
-                                    {initials}
-                                  </div>
-                                )}
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-slate-900 dark:text-white truncate text-sm leading-snug">
-                                    {user.fullName}
-                                  </div>
-                                  <div className="text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5 font-sans">
-                                    {user.position || user.role}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* 2. Contact Details Column */}
-                            <td className="py-3.5 px-4 text-xs font-mono">
-                              <div className="text-slate-800 dark:text-zinc-200 truncate flex items-center gap-2 leading-snug">
-                                <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span className="truncate">{user.workEmail || user.personalEmail}</span>
-                              </div>
-                              <div className="text-slate-500 dark:text-zinc-400 text-[11px] mt-1 flex items-center gap-2 leading-tight">
-                                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span>{user.phonePrimary || '+254 700 000 000'}</span>
-                              </div>
-                            </td>
-
-                            {/* 3. Granted Permissions Column */}
-                            <td className="py-3.5 px-4">
-                              <div className="space-y-1.5">
-                                <div className="flex items-center gap-2">
-                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${isFullAccess
-                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800'
-                                      : 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-200/80 dark:border-blue-800'
-                                    }`}>
-                                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                                    <span>
-                                      {isFullAccess
-                                        ? `Full Access (${tpl?.permissions.length || 68})`
-                                        : `${tpl?.permissions.length || 45} Permissions`}
-                                    </span>
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setViewingPermissionsUserId(viewingPermissionsUserId === user.id ? null : user.id)}
-                                    className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-semibold cursor-pointer shrink-0"
-                                  >
-                                    {viewingPermissionsUserId === user.id ? 'Hide' : 'Details'}
-                                  </button>
-                                </div>
-
-                                {viewingPermissionsUserId === user.id && (
-                                  <div className="mt-2 p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-[var(--border-color)] max-h-32 overflow-y-auto flex flex-wrap gap-1.5 animate-fadeIn">
-                                    {(tpl?.permissions || []).map(p => (
-                                      <span key={p.code} className="px-2 py-0.5 rounded-lg bg-white dark:bg-zinc-900 text-[10px] font-mono text-slate-600 dark:text-zinc-400 border border-[var(--border-color)]/70">
-                                        {p.code}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* 4. Actions Column: Clean [View Profile] + [Permissions] + direct [Delete] */}
-                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => setManagingUser(user)}
-                                  className="px-3 py-1.5 text-xs font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
-                                  title="View User Profile"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  <span>View Profile</span>
-                                </button>
-
-                                <button
-                                  onClick={() => onNavigateTab('permissions', user.id)}
-                                  className="px-3 py-1.5 text-xs font-semibold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
-                                  title="Configure User Permissions"
-                                >
-                                  <ShieldCheck className="w-3.5 h-3.5" />
-                                  <span>Permissions</span>
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    setMessagingUser(user);
-                                    setMessageText('');
-                                  }}
-                                  className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors cursor-pointer"
-                                  title="Send Note to User"
-                                >
-                                  <MessageSquare className="w-4 h-4" />
-                                </button>
-
-                                <button
-                                  onClick={() => handleDeleteUser(user)}
-                                  className="px-2.5 py-1.5 text-xs font-semibold bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 dark:hover:bg-rose-900/60 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
-                                  title={`Permanently delete ${user.fullName} from firm database`}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                  <span>Delete</span>
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* TAB 3: CLIENT ACCOUNTS */}
-              {executiveActiveTab === 'clients' && (
-                <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-[var(--border-color)] text-[11px] font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider bg-[var(--bg-subtle)] h-[42px]">
-                        <th className="py-3.5 px-4 min-w-[200px]">Client</th>
-                        <th className="py-3.5 px-4 min-w-[120px]">Category</th>
-                        <th className="py-3.5 px-4 min-w-[200px]">Contact Person</th>
-                        <th className="py-3.5 px-4 font-mono text-center min-w-[100px]">Active Matters</th>
-                        <th className="py-3.5 px-4 font-mono text-right min-w-[140px]">Total Billed</th>
-                        <th className="py-3.5 px-4 text-right min-w-[120px]">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border-color)]/60 font-sans">
-                      {clients.map((client) => (
-                        <tr key={client.id} className="hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-colors">
-                          <td className="py-3.5 px-4">
-                            <span className="font-semibold text-slate-900 dark:text-white block">{client.name}</span>
-                            <span className="text-[11px] font-mono text-slate-400">{client.code} &middot; PIN: {client.kraPin}</span>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className="inline-block px-2.5 py-0.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)]/70">
-                              {client.category}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className="text-slate-800 dark:text-zinc-200 block font-medium">{client.contactPerson}</span>
-                            <span className="text-[11px] font-mono text-slate-400">{client.email}</span>
-                          </td>
-                          <td className="py-3.5 px-4 font-mono font-bold text-center text-slate-900 dark:text-white">
-                            {client.activeMattersCount ?? 0}
-                          </td>
-                          <td className="py-3.5 px-4 font-mono font-bold text-right text-emerald-600 dark:text-emerald-400">
-                            KES {(client.totalBilledAmount ?? 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-3.5 px-4 text-right">
-                            <button
-                              onClick={() => onNavigateTab('clients')}
-                              className="px-3 py-1.5 text-xs font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-lg transition-colors cursor-pointer"
-                            >
-                              View Client
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
+              <ClientRetainerEscrowWidget
+                clients={clients}
+                matters={matters}
+                onNavigateTab={onNavigateTab}
+              />
             </div>
-          ) : (
-            /* Upcoming Court Filings & Taxations Table for Regular Advocates */
-            <div className="modulix-card p-0 overflow-hidden">
-              <div className="p-5 flex items-center justify-between border-b border-slate-200/70">
-                <div>
-                  <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white">
-                    Upcoming Court Filings & Taxations
-                  </h3>
-                  <p className="text-xs text-slate-500">Live Active Causes Registered in Database</p>
-                </div>
-                <button
-                  onClick={() => onNavigateTab('matters')}
-                  className="flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:border-blue-500 cursor-pointer"
-                >
-                  <Filter className="w-3.5 h-3.5 text-blue-600" />
-                  <span>View Matters</span>
-                </button>
-              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="modulix-table-header">
-                      <th className="py-3 px-5">
-                        <input
-                          type="checkbox"
-                          className="rounded cursor-pointer"
-                          checked={selectedMatterIds.length > 0 && selectedMatterIds.length === matters.length}
-                          onChange={() => {
-                            if (selectedMatterIds.length === matters.length) setSelectedMatterIds([]);
-                            else setSelectedMatterIds(matters.map(m => m.id));
-                          }}
-                          title="Select All / Clear All"
-                        />
-                      </th>
-                      <th className="py-3 px-4">Cause / Matter ID</th>
-                      <th className="py-3 px-4">Client / Title</th>
-                      <th className="py-3 px-4">Claim Amount</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200/70 dark:divide-zinc-800 text-xs">
-                    {matters.map((m) => {
-                      const isChecked = selectedMatterIds.includes(m.id);
-                      return (
-                        <tr
-                          key={m.id}
-                          onClick={() => handleViewMatter(m.id)}
-                          className={`hover:bg-slate-50/80 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer ${isChecked ? 'bg-blue-50/40 dark:bg-blue-900/10' : ''
-                            }`}
-                        >
-                          <td className="py-3.5 px-5" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              className="rounded cursor-pointer"
-                              checked={isChecked}
-                              onChange={() => {
-                                setSelectedMatterIds(prev =>
-                                  prev.includes(m.id) ? prev.filter(mId => mId !== m.id) : [...prev, m.id]
-                                );
-                              }}
-                            />
-                          </td>
-                          <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white">
-                            {m.caseNo}
-                          </td>
-                          <td className="py-3.5 px-4 font-semibold text-slate-800 dark:text-zinc-200">
-                            {m.title}
-                          </td>
-                          <td className="py-3.5 px-4 font-mono font-semibold text-slate-900 dark:text-blue-400">
-                            KES {m.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${m.statusClass === 'ready'
-                                ? 'badge-green'
-                                : 'badge-blue'
-                              }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${m.statusClass === 'ready' ? 'bg-emerald-500' : 'bg-blue-500'
-                                }`}></span>
-                              {m.status}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleViewMatter(m.id);
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors cursor-pointer"
-                                title="Open & View Matter Details"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleEditMatter(m.id);
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors cursor-pointer"
-                                title="Edit Matter"
-                              >
-                                <FileEdit className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-      </div>
+            <ExecutiveTabbedTables
+              feeNotes={feeNotes}
+              matters={matters}
+              users={users}
+              clients={clients}
+              userRoleMap={userRoleMap}
+              roleTemplates={roleTemplates}
+              onNavigateTab={onNavigateTab}
+              handleOpenAddUserModal={handleOpenAddUserModal}
+              handleOpenNote={handleOpenNote}
+              handleToggleProcess={handleToggleProcess}
+              handleViewMatter={handleViewMatter}
+              setManagingUser={setManagingUser}
+              setMessagingUser={setMessagingUser}
+              setMessageText={setMessageText}
+              handleDeleteUser={handleDeleteUser}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

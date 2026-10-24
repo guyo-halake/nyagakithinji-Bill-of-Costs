@@ -293,22 +293,22 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-12 w-full">
+    <div className="space-y-4 pb-12 w-full">
       {/* Title & Action Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-2 border-b border-[var(--border-color)]/60 pb-5">
+      <div className="pt-1 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border-color)]/60">
         <div>
-          <h1 className="font-brand font-extrabold text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight">
-            Clients Directory
+          <h1 className="font-brand font-extrabold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
+            Clients
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1 font-sans">
-            Registered Firm Clients & E-TIMS Tax Accounts ({clientsList.length} Active Records)
+          <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 font-sans">
+            Registered firm clients &amp; tax accounts ({clientsList.length} active records)
           </p>
         </div>
 
         {can('clients.create') && (
           <button
             onClick={() => setShowNewClientModal(true)}
-            className="px-4 py-2.5 bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer shrink-0"
+            className="px-4 py-2 bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer shrink-0"
           >
             <UserPlus className="w-4 h-4" />
             <span>Add Client</span>

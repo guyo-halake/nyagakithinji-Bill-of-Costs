@@ -21,6 +21,19 @@
   --font-mono: 'Roboto Mono', monospace;
 }
 
+:root.dark,
+.dark,
+body.dark-mode {
+  --bg-main: #070a12;
+  --bg-card: #0d131f;
+  --bg-subtle: #141d2f;
+  --border-color: #202f4a;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --btn-bg: #ffffff;
+  --btn-text: #070a12;
+}
+
 
 
 body {

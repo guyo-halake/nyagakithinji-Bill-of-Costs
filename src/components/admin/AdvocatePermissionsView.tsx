@@ -11,6 +11,7 @@ import {
   User, MessageSquare, Home, BookOpen, Mail
 } from 'lucide-react';
 import { MailingTemplatesView } from './MailingTemplatesView';
+import { AdminUsersRolesView } from './AdminUsersRolesView';
 import {
   RoleTemplate,
   fetchRoleTemplates,
@@ -89,8 +90,8 @@ interface AdvocatePermissionsViewProps {
 }
 
 export const AdvocatePermissionsView: React.FC<AdvocatePermissionsViewProps> = ({ currentUser, initialUserId }) => {
-  // Navigation Tabs: 'staff' | 'templates' | 'mailings' | 'catalog'
-  const [activeTab, setActiveTab] = useState<'staff' | 'templates' | 'mailings' | 'catalog'>(initialUserId ? 'staff' : 'staff');
+  // Navigation Tabs: 'staff' | 'users' | 'templates' | 'mailings' | 'catalog'
+  const [activeTab, setActiveTab] = useState<'staff' | 'users' | 'templates' | 'mailings' | 'catalog'>(initialUserId ? 'staff' : 'staff');
 
   // Core Data State
   const [permissionCatalog, setPermissionCatalog] = useState<PermissionCatalogItem[]>([]);
@@ -155,6 +156,40 @@ export const AdvocatePermissionsView: React.FC<AdvocatePermissionsViewProps> = (
   });
 
   const [showManageOverridesModal, setShowManageOverridesModal] = useState(false);
+
+  // Global Fee Notes Ledger Visibility Policy State
+  const [feeNotesScope, setFeeNotesScope] = useState<'all' | 'self'>(() => {
+    return (localStorage.getItem('FEE_NOTES_VISIBILITY_SCOPE') as 'all' | 'self') || 'all';
+  });
+
+  useEffect(() => {
+    const handleScopeChange = (e: any) => {
+      if (e.detail) {
+        setFeeNotesScope(e.detail);
+      }
+    };
+    window.addEventListener('feeNotesVisibilityChanged', handleScopeChange);
+    return () => window.removeEventListener('feeNotesVisibilityChanged', handleScopeChange);
+  }, []);
+
+  const handleSetFeeNotesScope = (scope: 'all' | 'self') => {
+    setFeeNotesScope(scope);
+    localStorage.setItem('FEE_NOTES_VISIBILITY_SCOPE', scope);
+    window.dispatchEvent(new CustomEvent('feeNotesVisibilityChanged', { detail: scope }));
+    logSystemActivity(
+      currentUser?.id || 'admin',
+      'POLICY_CHANGE',
+      'Advocate Fee Notes Access Policy',
+      `Policy set to ${scope === 'all' ? 'Allow All Fee Notes (Full firm ledger visible)' : 'Allow Self Only (Restricted to self-drafted notes)'}`
+    );
+    showToast(
+      'success',
+      scope === 'all' ? 'All Fee Notes Allowed' : 'Self Only Policy Active',
+      scope === 'all' 
+        ? 'Advocates can now view the entire firm fee notes ledger.'
+        : 'Advocates are now restricted to seeing only their own fee notes.'
+    );
+  };
 
   // Load all initial data
   const loadAllData = async () => {
@@ -390,13 +425,68 @@ export const AdvocatePermissionsView: React.FC<AdvocatePermissionsViewProps> = (
   return (
     <div className="space-y-5 text-slate-900 dark:text-white font-sans pb-16">
 
+      {/* Fee Notes Access Policy Banner ("Allow All Fee Notes" vs. "Allow Self Only") */}
+      <div className="bg-gradient-to-r from-blue-900/20 via-zinc-900 to-indigo-900/20 border border-blue-500/30 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+            <Eye className="w-5 h-5 text-blue-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">Fee Notes Access Policy</span>
+              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                feeNotesScope === 'all'
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+              }`}>
+                {feeNotesScope === 'all' ? '● Firm-Wide: All Fee Notes Allowed' : '● Restricted: Self Only Allowed'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 leading-relaxed">
+              {feeNotesScope === 'all'
+                ? 'Allow All Fee Notes: Advocates see the entire firm\'s fee notes ledger across all matters and counsel.'
+                : 'Allow Self Only: Restricts advocates so they can only see fee notes they drafted themselves.'}
+            </p>
+          </div>
+        </div>
+
+        {/* Dedicated Policy Action Buttons */}
+        <div className="flex items-center gap-2 shrink-0 bg-slate-100 dark:bg-zinc-950/80 p-1.5 rounded-xl border border-slate-200 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={() => handleSetFeeNotesScope('all')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              feeNotesScope === 'all'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-bold'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-zinc-800/80'
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Allow All Fee Notes</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSetFeeNotesScope('self')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              feeNotesScope === 'self'
+                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-bold'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-zinc-800/80'
+            }`}
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>Allow Self Only</span>
+          </button>
+        </div>
+      </div>
+
       {/* Minimalist Modern Navigation Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-[var(--border-color)]/60">
 
         {/* Switchable Tabs: Permissions, Role Templates, Mailing Templates */}
         <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-zinc-800/70 rounded-xl w-fit flex-wrap">
           {[
-            { id: 'staff' as const, label: 'Permissions', icon: ShieldCheck, count: firmUsers.length },
+            { id: 'staff' as const, label: 'Permissions Matrix', icon: ShieldCheck, count: firmUsers.length },
+            { id: 'users' as const, label: 'Users & Roles', icon: Users, count: firmUsers.length },
             { id: 'templates' as const, label: 'Role Templates', icon: Layers, count: roleTemplates.length },
             { id: 'mailings' as const, label: 'Mailing Templates', icon: Mail, count: 6 },
             { id: 'catalog' as const, label: 'System Catalog', icon: Key, count: permissionCatalog.length },
@@ -498,6 +588,15 @@ export const AdvocatePermissionsView: React.FC<AdvocatePermissionsViewProps> = (
           )}
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* TAB 0: USERS & ROLES VIEW (ADMINISTRATION & ROSTER CONTROLS) */}
+      {/* ========================================================================= */}
+      {activeTab === 'users' && (
+        <div className="pt-2">
+          <AdminUsersRolesView />
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 1: ROLE TEMPLATES STUDIO */}

@@ -320,7 +320,7 @@ export const App: React.FC = () => {
           currentUser={currentUser}
         />
 
-        <main className="flex-1 overflow-y-auto px-4 sm:px-8 lg:px-10 py-6 w-full space-y-6">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 w-full space-y-4">
           {/* Universal Back Button & Breadcrumb Navigation Bar (All Pages Except Home) */}
           <BreadcrumbsNav
             currentTab={currentTab}

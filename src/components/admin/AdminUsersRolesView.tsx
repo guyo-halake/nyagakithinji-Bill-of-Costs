@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SEEDED_USERS, SystemUser } from '../../services/supabase';
+import { fetchFirmUsers, createFirmUser, updateFirmUser, deleteFirmUser } from '../../services/data';
 import { 
   Users, UserPlus, Key, ShieldCheck, CheckCircle2, Lock, Trash2, Edit, 
   RefreshCw, Phone, Mail, Shield, Award, CheckSquare, X, Eye, EyeOff,
@@ -14,6 +15,15 @@ export const AdminUsersRolesView: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
+
+  // Load authoritative database users on mount
+  useEffect(() => {
+    fetchFirmUsers().then(users => {
+      if (users && users.length > 0) {
+        setUserList(users);
+      }
+    }).catch(() => {});
+  }, []);
 
   // 2FA Password Reset State
   const [passwordModalUser, setPasswordModalUser] = useState<SystemUser | null>(null);
@@ -55,8 +65,7 @@ export const AdminUsersRolesView: React.FC = () => {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newUser: SystemUser = {
-      id: 'usr-' + (userList.length + 1) + '-' + Date.now().toString().slice(-4),
+    const newUserRecord: Partial<SystemUser> = {
       fullName,
       advocateTitle: fullName,
       lskNo: lskNo || 'P.105/' + Math.floor(1000 + Math.random() * 9000),
@@ -70,35 +79,42 @@ export const AdminUsersRolesView: React.FC = () => {
       passwordHash: password || 'lawyer123'
     };
 
+    const savedUser = await createFirmUser('firm-001', newUserRecord);
+
     // Link with matching standardized role template
     const templateCode = role === 'Developer' ? 'developer_sys_admin' : role === 'Admin' ? 'managing_partner_exec' : 'senior_advocates_lawyers';
     const targetTpl = FOUR_ROLE_TEMPLATES.find((t: RoleTemplate) => t.code === templateCode);
     if (targetTpl) {
-      await assignRoleToUser(newUser.id, targetTpl.id);
+      await assignRoleToUser(savedUser.id, targetTpl.id);
     }
 
-    setUserList([newUser, ...userList]);
+    setUserList([savedUser, ...userList.filter(u => u.id !== savedUser.id && u.workEmail?.toLowerCase() !== savedUser.workEmail?.toLowerCase())]);
     setShowAddModal(false);
     resetForm();
-    showToast('success', 'User Onboarded', `Account created for ${fullName}. Welcome email dispatched.`);
+    showToast('success', 'User Onboarded', `Account created for ${fullName} in database. Welcome email dispatched.`);
   };
 
-  const handleUpdateUser = (e: React.FormEvent) => {
+  const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
 
-    setUserList(prev => prev.map(u => u.id === editingUser.id ? {
+    const updatedUser: SystemUser = {
       ...editingUser,
       advocateTitle: editingUser.fullName
-    } : u));
+    };
+    await updateFirmUser('firm-001', updatedUser);
+
+    setUserList(prev => prev.map(u => u.id === editingUser.id ? updatedUser : u));
     setEditingUser(null);
     showToast('success', 'Profile Updated', `Updated profile for "${editingUser.fullName}" in database.`);
   };
 
-  const handleDeleteUser = (userId: string, userName: string) => {
+  const handleDeleteUser = async (userId: string, userName: string) => {
     if (window.confirm(`Are you sure you want to permanently delete the user account for "${userName}"?`)) {
+      const userToDelete = userList.find(u => u.id === userId);
+      await deleteFirmUser('firm-001', userId, userToDelete?.workEmail, userToDelete);
       setUserList(prev => prev.filter(u => u.id !== userId));
-      showToast('info', 'User Removed', `User "${userName}" deleted from database.`);
+      showToast('info', 'User Removed', `User "${userName}" permanently deleted from database.`);
     }
   };
 
@@ -134,7 +150,7 @@ export const AdminUsersRolesView: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    const adminEmail = 'vickarani@gmail.com'; // Logged-in admin
+    const adminEmail = 'alexkaranivic@gmail.com'; // Logged-in admin
     try {
       const res = await fetch(`${apiBase}/api/v1/auth-2fa/send-otp`, {
         method: 'POST',
@@ -220,28 +236,77 @@ export const AdminUsersRolesView: React.FC = () => {
     }
   };
 
+  const [feeNotesScope, setFeeNotesScope] = useState<'all' | 'self'>(() => {
+    return (localStorage.getItem('FEE_NOTES_VISIBILITY_SCOPE') as 'all' | 'self') || 'all';
+  });
+
+  const handleSetFeeNotesScope = (scope: 'all' | 'self') => {
+    setFeeNotesScope(scope);
+    localStorage.setItem('FEE_NOTES_VISIBILITY_SCOPE', scope);
+    window.dispatchEvent(new CustomEvent('feeNotesVisibilityChanged', { detail: scope }));
+    showToast(
+      'success',
+      'Fee Notes Policy Updated',
+      scope === 'all'
+        ? 'All advocates can now view all firm fee notes on the ledger.'
+        : 'Advocates are now restricted to viewing only their own generated fee notes.'
+    );
+  };
+
   return (
-    <div className="w-full space-y-8 pb-12 text-xs">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-color)]/50 pb-4">
+    <div className="w-full space-y-4 pb-12 text-xs">
+      {/* Header - Compact */}
+      <div className="pt-1 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)]/50 pb-3">
         <div>
-          <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono font-bold text-[10px] flex items-center gap-1.5 w-fit">
-            <Lock className="w-3.5 h-3.5" /> 2FA-PROTECTED CREDENTIALS & ONBOARDING
+          <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono font-bold text-[9px] flex items-center gap-1.5 w-fit">
+            <Lock className="w-3 h-3" /> 2FA CREDENTIALS &amp; ACCESS
           </span>
-          <h1 className="font-brand font-extrabold text-2xl text-[var(--text-main)] tracking-tight mt-1">
-            User Accounts & Password Management
+          <h1 className="font-brand font-extrabold text-xl sm:text-2xl text-[var(--text-main)] tracking-tight mt-1">
+            Permissions &amp; Users
           </h1>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Onboard new firm staff, update credentials with real-time 2FA OTP confirmation, and manage database security profiles.
+            Staff onboarding, roles, permissions, and credential security
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn-black px-4 py-2.5 text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0"
-        >
-          <UserPlus className="w-4 h-4" /> Add New System User
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Fee Notes Access Policy Toggle */}
+          <div className="flex items-center p-1 bg-slate-100 dark:bg-zinc-800 rounded-xl border border-[var(--border-color)]">
+            <button
+              type="button"
+              onClick={() => handleSetFeeNotesScope('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                feeNotesScope === 'all'
+                  ? 'bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-xs font-bold border border-slate-200 dark:border-zinc-700'
+                  : 'text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
+              }`}
+              title="Advocates can view all fee notes across the firm"
+            >
+              <Eye className="w-3.5 h-3.5 text-blue-500" />
+              <span>Allow All Fee Notes</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetFeeNotesScope('self')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                feeNotesScope === 'self'
+                  ? 'bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-xs font-bold border border-slate-200 dark:border-zinc-700'
+                  : 'text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
+              }`}
+              title="Advocates only see fee notes they personally generated"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span>Allow Self Only</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn-black px-4 py-2 text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0"
+          >
+            <UserPlus className="w-4 h-4" /> Add User
+          </button>
+        </div>
       </div>
 
       {/* Tabs Filter */}

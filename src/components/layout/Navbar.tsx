@@ -121,21 +121,34 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
-    <header className="h-18 sm:h-20 bg-[var(--bg-main)] px-4 sm:px-6 flex items-center justify-between sticky top-0 z-40 transition-colors duration-200 border-b border-[var(--border-color)]/40">
+    <header className="h-14 bg-[var(--bg-main)] px-4 sm:px-6 flex items-center justify-between sticky top-0 z-40 transition-colors duration-200 border-b border-[var(--border-color)]/40">
       
-      {/* Left Area: Hamburger Toggle + Logo (Always Visible) */}
-      <div className="flex items-center gap-4 shrink-0 relative z-10">
+      {/* Left Area: Hamburger Toggle + Mobile-only Logo */}
+      <div className="flex items-center gap-3 shrink-0 relative z-10">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="p-2 rounded-xl text-slate-700 dark:text-zinc-300 hover:text-blue-500 transition-colors focus:outline-none cursor-pointer shrink-0"
+          className="p-1.5 rounded-lg text-slate-700 dark:text-zinc-300 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors focus:outline-none cursor-pointer shrink-0"
           title="Toggle Navigation Menu"
         >
           {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
 
-        {/* Firm Logo: Prominent, Big, Clean (No Kithinji & Co text) */}
-        <div className="flex items-center gap-3 shrink-0 py-1">
+        {/* Firm Logo: Shown on mobile/tablet when sidebar is hidden */}
+        <div className="flex items-center gap-2 shrink-0 py-0.5 lg:hidden">
           <img
             src={firmSettings.logoUrl || '/logo.png'}
             alt=""
@@ -143,29 +156,34 @@ export const Navbar: React.FC<NavbarProps> = ({
               e.currentTarget.onerror = null;
               e.currentTarget.src = '/logo.png';
             }}
-            className="h-14 sm:h-16 md:h-18 max-h-18 max-w-[260px] w-auto object-contain shrink-0 transition-transform hover:scale-105"
+            className="h-8 max-h-8 max-w-[160px] w-auto object-contain shrink-0"
           />
         </div>
       </div>
 
       {/* Center Area: Global Top Search Bar */}
       <div className="flex-1 max-w-lg px-4 hidden sm:block relative z-0 mx-auto">
-        <div className="flex items-center gap-2 bg-slate-100 dark:bg-zinc-800/80 border border-slate-200/80 dark:border-zinc-700/80 rounded-2xl px-3.5 py-1.5 w-full transition-all focus-within:border-blue-500 focus-within:bg-white dark:focus-within:bg-zinc-900 focus-within:ring-2 focus-within:ring-blue-500/10">
-          <Search className="w-4 h-4 text-slate-400 shrink-0" />
+        <div className="flex items-center gap-2 bg-slate-100 dark:bg-zinc-800/80 border border-slate-200/80 dark:border-zinc-700/80 rounded-xl px-3 py-1.5 w-full transition-all focus-within:border-blue-500 focus-within:bg-white dark:focus-within:bg-zinc-900 focus-within:ring-2 focus-within:ring-blue-500/10">
+          <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <input
+            ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery && setSearchQuery(e.target.value)}
             placeholder="Search anything... matters, clients, fee notes"
             className="bg-transparent text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none w-full font-sans"
           />
-          {searchQuery && (
+          {searchQuery ? (
             <button
               onClick={() => setSearchQuery && setSearchQuery('')}
               className="text-slate-400 hover:text-slate-600 text-xs font-bold"
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          ) : (
+            <kbd className="hidden md:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-slate-200/70 dark:bg-zinc-700/70 rounded">
+              ⌘K
+            </kbd>
           )}
         </div>
       </div>
@@ -248,7 +266,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {currentUser?.advocateTitle || currentUser?.fullName || EXACT_FIRM_INFO.user.name}
               </span>
               <span className="text-[10px] text-slate-400 font-mono block">
-                {currentUser?.workEmail || "vickarani@gmail.com"}
+                {currentUser?.workEmail || "alexkaranivic@gmail.com"}
               </span>
             </div>
 

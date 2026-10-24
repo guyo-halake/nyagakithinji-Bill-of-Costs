@@ -167,22 +167,22 @@ export const DocumentVaultView: React.FC<DocumentVaultViewProps> = ({ currentUse
   };
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-4 pb-12">
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-2 px-1 border-b border-[var(--border-color)]/50 pb-5">
+      <div className="pt-1 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[var(--border-color)]/50 pb-3">
         <div>
-          <h1 className="font-brand font-extrabold text-2xl text-[var(--text-main)] tracking-tight">
-            Documentations & Storage Vault
+          <h1 className="font-brand font-extrabold text-xl sm:text-2xl text-[var(--text-main)] tracking-tight">
+            Documents
           </h1>
-          <p className="text-xs sm:text-sm text-[var(--text-muted)] mt-1">
-            Unified Supabase Storage for Legal PDFs, Excel Statements, Media, and Cause Filings
+          <p className="text-xs text-[var(--text-muted)] mt-0.5 font-sans">
+            Legal PDFs, Excel statements, media, and cause filings
           </p>
         </div>
 
         {/* Upload Button connected to Supabase storage */}
         {can('vault.upload') && (
           <label className="btn-black px-4 py-2 text-xs font-semibold flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer">
-            <Upload className="w-4 h-4" /> Upload New File
+            <Upload className="w-4 h-4" /> Upload File
             <input
               type="file"
               onChange={handleFileUpload}

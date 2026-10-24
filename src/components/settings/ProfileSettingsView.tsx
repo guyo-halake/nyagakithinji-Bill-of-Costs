@@ -730,7 +730,7 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-16">
+    <div className="space-y-4 max-w-5xl mx-auto pb-12">
       
       {/* Hidden File Upload Inputs */}
       <input
@@ -756,14 +756,14 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
         </div>
       )}
 
-      {/* Main Command Suite Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-2 border-b border-[var(--border-color)]/60 pb-4">
+      {/* Main Command Suite Header - Compact */}
+      <div className="pt-1 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)]/60 pb-3">
         <div>
-          <h1 className="font-brand font-extrabold text-2xl text-slate-900 dark:text-white tracking-tight">
-            Firm Settings & Preferences
+          <h1 className="font-brand font-extrabold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
+            Settings
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-0.5 font-sans">
-            Configure advocate coordinates, letterhead branding, calculation scales, and security
+          <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 font-sans">
+            Advocate coordinates, letterhead branding, calculation scales, and security
           </p>
         </div>
 

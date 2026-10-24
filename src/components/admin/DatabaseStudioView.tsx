@@ -40,6 +40,7 @@ import {
   getMatters,
   getClients
 } from '../../services/supabase';
+import { updateFirmUser, fetchFirmUsers } from '../../services/data';
 import { getActivityLogs, logSystemActivity, ActivityLogItem } from '../../services/activityLogger';
 import { DEFAULT_ADVOCATE_TICKETS, ITTicketRecord } from '../support/TechSupportView';
 import { showToast } from './ToastNotification';
@@ -178,10 +179,7 @@ export const DatabaseStudioView: React.FC<DatabaseStudioViewProps> = ({ currentU
     setFeeNotes(getFeeNotes());
     setMatters(getMatters());
     setClients(getClients());
-    try {
-      const u = localStorage.getItem('EXACT_USERS');
-      if (u) setUsers(JSON.parse(u));
-    } catch (e) {}
+    fetchFirmUsers().then(u => { if (u && u.length > 0) setUsers(u); }).catch(() => {});
     try {
       const t = localStorage.getItem('BILLSZIP_SUPPORT_TICKETS_REAL');
       if (t) setTickets(JSON.parse(t));
@@ -238,6 +236,7 @@ export const DatabaseStudioView: React.FC<DatabaseStudioViewProps> = ({ currentU
       setUsers(updated);
       localStorage.setItem('EXACT_USERS', JSON.stringify(updated));
       saveUserProfile(editingRow);
+      updateFirmUser('firm-001', editingRow);
       window.dispatchEvent(new CustomEvent('permissionsUpdated'));
       logSystemActivity(
         'User Role & Account Updated',
@@ -277,6 +276,7 @@ export const DatabaseStudioView: React.FC<DatabaseStudioViewProps> = ({ currentU
     setUsers(updated);
     localStorage.setItem('EXACT_USERS', JSON.stringify(updated));
     saveUserProfile(updatedUser);
+    updateFirmUser('firm-001', updatedUser);
     window.dispatchEvent(new CustomEvent('permissionsUpdated'));
     logSystemActivity(
       'Role Modified',

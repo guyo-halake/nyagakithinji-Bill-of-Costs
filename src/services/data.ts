@@ -548,37 +548,18 @@ export async function fetchFirmUsers(firmId: string = 'firm-001'): Promise<Syste
     }
   } catch (e) {}
 
-  const stored = typeof window !== 'undefined' ? localStorage.getItem('EXACT_USERS') : null;
-  let localUsers: SystemUser[] = stored ? JSON.parse(stored) : [];
-
-  // Filter out any locally deleted users from local storage
-  localUsers = localUsers.filter(u => !isUserRecordDeleted(u, deletedKeys));
-
-  // Guarantee base SEEDED_USERS are included only if not explicitly deleted
-  SEEDED_USERS.forEach(su => {
-    if (isUserRecordDeleted(su, deletedKeys)) return;
-    if (!localUsers.some(u => u.id.toLowerCase() === su.id.toLowerCase() || u.workEmail.toLowerCase() === su.workEmail.toLowerCase())) {
-      localUsers.push(su);
-    }
-  });
-
   const mergedMap = new Map<string, SystemUser>();
-  localUsers.forEach(u => mergedMap.set(u.id, u));
+  let databaseFoundUsers = false;
 
-  // 1. Fetch from authoritative backend persistent engine
+  // 1. Fetch from authoritative backend persistent engine (/api/v1/users)
   try {
     const res = await fetch('/api/v1/users');
     if (res.ok) {
       const data = await res.json();
-      if (data && Array.isArray(data.users)) {
+      if (data && Array.isArray(data.users) && data.users.length > 0) {
+        databaseFoundUsers = true;
         data.users.forEach((u: any) => {
-          // If the database returns this user, clean up any stale deleted keys for them
-          if (u.id) deletedKeys.delete(u.id.toLowerCase());
-          if (u.workEmail) deletedKeys.delete(u.workEmail.toLowerCase());
-          if (u.personalEmail) deletedKeys.delete(u.personalEmail.toLowerCase());
-          if (u.username) deletedKeys.delete(u.username.toLowerCase());
-          if (u.fullName) deletedKeys.delete(u.fullName.toLowerCase());
-
+          if (isUserRecordDeleted(u, deletedKeys)) return;
           const mapped: SystemUser = {
             id: u.id,
             fullName: u.fullName,
@@ -607,12 +588,9 @@ export async function fetchFirmUsers(firmId: string = 'firm-001'): Promise<Syste
   try {
     const { data, error } = await supabase.from('users').select('*').order('full_name');
     if (!error && data && data.length > 0) {
+      databaseFoundUsers = true;
       data.forEach((row: any) => {
-        if (row.id) deletedKeys.delete(row.id.toLowerCase());
-        if (row.email) deletedKeys.delete(row.email.toLowerCase());
-        if (row.username) deletedKeys.delete(row.username.toLowerCase());
-        if (row.full_name) deletedKeys.delete(row.full_name.toLowerCase());
-
+        if (isUserRecordDeleted(row, deletedKeys)) return;
         const existing = mergedMap.get(row.id) || Array.from(mergedMap.values()).find(u => u.workEmail?.toLowerCase() === (row.email || '').toLowerCase());
         const dbUser: SystemUser = {
           id: row.id,
@@ -637,6 +615,24 @@ export async function fetchFirmUsers(firmId: string = 'firm-001'): Promise<Syste
     }
   } catch (e) {}
 
+  // 3. Fallback only if database is completely offline/empty AND localStorage is empty
+  if (!databaseFoundUsers) {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('EXACT_USERS') : null;
+    let localUsers: SystemUser[] = stored ? JSON.parse(stored) : [];
+    const obsoleteIds = new Set(['usr-faith-chebet', 'usr-brian-omondi', 'usr-mercy-wanjiku', 'usr-kevin-mutua', 'usr-karani-admin']);
+    localUsers = localUsers.filter(u => !obsoleteIds.has(u.id) && !isUserRecordDeleted(u, deletedKeys));
+
+    if (localUsers.length === 0) {
+      SEEDED_USERS.forEach(su => {
+        if (!isUserRecordDeleted(su, deletedKeys)) {
+          localUsers.push(su);
+        }
+      });
+    }
+
+    localUsers.forEach(u => mergedMap.set(u.id, u));
+  }
+
   // Synchronize cleaned-up deletedKeys back to storage
   if (typeof window !== 'undefined') {
     try {
@@ -644,7 +640,7 @@ export async function fetchFirmUsers(firmId: string = 'firm-001'): Promise<Syste
     } catch (e) {}
   }
 
-  // Return all active persistent users
+  // Return all active persistent users and save cache
   const result = Array.from(mergedMap.values());
   try {
     localStorage.setItem('EXACT_USERS', JSON.stringify(result));

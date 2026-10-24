@@ -926,17 +926,17 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
   // RENDER MAIN COMPONENT
   // ==========================================================================
   return (
-    <div className="w-full space-y-6 pb-16 font-sans text-slate-900 dark:text-zinc-100 animate-fadeIn">
+    <div className="w-full space-y-4 pb-12 font-sans text-slate-900 dark:text-zinc-100 animate-fadeIn">
 
       {/* ================================================================== */}
       {/* 1. TOP P3L DEVELOPERS CONTACT CARD                                 */}
       {/* ================================================================== */}
-      <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-[var(--border-color)] shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="space-y-1.5">
+      <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-[var(--border-color)] shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              <h2 className="font-brand font-bold text-base text-slate-900 dark:text-white tracking-tight">
+              <h2 className="font-brand font-bold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
                 P3L Developers, Nairobi
               </h2>
             </div>
@@ -945,9 +945,9 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs font-mono">
             {/* Phone */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)]">
+            <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)]">
               <Phone className="w-3.5 h-3.5 text-blue-500" />
               <a href="tel:+254141888585" className="hover:underline font-bold text-slate-800 dark:text-zinc-200">+254 141 888 585</a>
               <span className="text-slate-400">&middot;</span>
@@ -955,7 +955,7 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
             </div>
 
             {/* Email */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)]">
+            <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)]">
               <Mail className="w-3.5 h-3.5 text-emerald-500" />
               <a href="mailto:p3lcodes@gmail.com" className="hover:underline font-bold text-slate-800 dark:text-zinc-200">p3lcodes@gmail.com</a>
               <span className="text-slate-400">&middot;</span>
@@ -968,9 +968,9 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
       {/* ================================================================== */}
       {/* 2. HEADER: P3L Developers IT Support                               */}
       {/* ================================================================== */}
-      <div className="border-b border-[var(--border-color)] pb-4 space-y-1">
-        <h1 className="font-brand font-bold text-2xl text-slate-900 dark:text-white tracking-tight">
-          P3L Developers IT Support
+      <div className="pt-1 mb-3 border-b border-[var(--border-color)] pb-3 space-y-0.5">
+        <h1 className="font-brand font-bold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
+          Support &amp; Helpdesk
         </h1>
         <p className="text-xs text-slate-500 font-mono">
           P3L Developers | Nyagah B Kithinji and co

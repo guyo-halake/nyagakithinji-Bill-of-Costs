@@ -1479,7 +1479,7 @@ ${c.email ? `Email: ${c.email}
   };
 
   return (
-    <div className="space-y-6 relative pb-12">
+    <div className="space-y-4 relative pb-12">
       {/* Toast Notification */}
       {actionToast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl border text-xs sm:text-sm font-semibold animate-in fade-in slide-in-from-top-4 duration-200 backdrop-blur-md transition-all bg-slate-900 text-white border-slate-700">
@@ -1489,14 +1489,14 @@ ${c.email ? `Email: ${c.email}
         </div>
       )}
 
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-color)] pb-4">
+      {/* Top Header - Compact */}
+      <div className="pt-1 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)]/60 pb-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold font-brand text-[var(--text-main)] tracking-tight">
-            Bill of Costs Studio
+            Bill of Costs
           </h1>
-          <p className="text-xs text-[var(--text-muted)] mt-1">
-            Compliant with the Advocates (Remuneration) Order (Legal Notice 64 of 1962 & L.N. 35/45 of 2014)
+          <p className="text-xs text-[var(--text-muted)] mt-0.5 font-sans">
+            Compliant with the Advocates (Remuneration) Order (L.N. 35/45 of 2014)
           </p>
         </div>
 
@@ -1513,7 +1513,7 @@ ${c.email ? `Email: ${c.email}
       </div>
 
       {/* 2-COLUMN STUDIO WORKSPACE */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         
         {/* LEFT COLUMN: 4-STAGE STEPPER STUDIO (5 OF 12 COLS) */}
         <div className="lg:col-span-5 space-y-6">

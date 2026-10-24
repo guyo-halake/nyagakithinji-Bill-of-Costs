@@ -472,20 +472,20 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
   ];
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header Banner - Standardized geometry matching Dashboard & Clients */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-2 border-b border-[var(--border-color)] pb-5">
+    <div className="space-y-4 pb-12">
+      {/* Header Banner - Standardized compact geometry matching Dashboard */}
+      <div className="pt-1 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[var(--border-color)]/60">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="font-brand font-extrabold text-2xl sm:text-3xl text-slate-900 dark:text-white tracking-tight">
-              Matters Register
+            <h1 className="font-brand font-extrabold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
+              Matters
             </h1>
             <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 font-mono text-xs font-semibold">
               {mattersList.length} Active Causes
             </span>
           </div>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1 font-sans">
-            High Court Causes, Subordinate Courts, Taxations & Arbitrations
+          <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 font-sans">
+            High Court causes, subordinate courts, taxations &amp; arbitrations
           </p>
         </div>
 
@@ -496,7 +496,7 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
               onClick={() => setShowNewMatterModal(true)}
               className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-zinc-100 font-sans font-semibold text-xs flex items-center gap-2 transition-all shadow-sm cursor-pointer"
             >
-              <Plus className="w-4 h-4 text-amber-400" /> + New Matter / Cause
+              <Plus className="w-4 h-4 text-amber-400" /> New Matter
             </button>
           )}
           {can('clients.view') && (
