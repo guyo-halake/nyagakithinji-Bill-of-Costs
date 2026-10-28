@@ -65,7 +65,7 @@ export const BreadcrumbsNav: React.FC<BreadcrumbsNavProps> = ({
   onNavigateTab,
   previousTab = 'home',
 }) => {
-  if (currentTab === 'home') return null;
+  if (currentTab === 'home' || currentTab === 'boc') return null;
 
   const currentConfig = TAB_CONFIG[currentTab] || { label: currentTab, icon: Folder };
   const CurrentIcon = currentConfig.icon;
@@ -79,13 +79,7 @@ export const BreadcrumbsNav: React.FC<BreadcrumbsNavProps> = ({
 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2 py-1 text-xs">
-      <button
-        onClick={handleBack}
-        className="text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center p-1.5"
-        title="Return to Previous Page"
-      >
-        <ArrowLeft className="w-5 h-5" />
-      </button>
+
 
       <div className="flex items-center gap-1.5 font-medium text-[var(--text-muted)] overflow-x-auto py-0.5">
         <button
