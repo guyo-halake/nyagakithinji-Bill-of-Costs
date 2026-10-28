@@ -1679,20 +1679,15 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const navItems: Array<{ id: AdminTab; label: string; icon: any; count?: number; badge?: string }> = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'karani_erp', label: 'Karani Law ERP', icon: Scale, badge: 'Live App' },
-    { id: 'projects_clients', label: 'Projects & Clients', icon: Briefcase, count: projects.length },
-    { id: 'client_crm', label: 'Client CRM', icon: UserCheck, count: 5 },
-    { id: 'finance_billing', label: 'Finance & Billing', icon: DollarSign, badge: 'KES 8,100' },
-    { id: 'server', label: 'Razak Server', icon: Cpu, badge: '12 TB NAS' },
-    { id: 'ai_infra', label: 'AI & Infrastructure', icon: Bot, badge: '45 TB AI' },
-    { id: 'career_education', label: 'Career & Education', icon: GraduationCap, count: kcaCourses.length },
-    { id: 'operations_log', label: 'Operations Log', icon: Activity, badge: 'Live' },
-    { id: 'users_rbac', label: 'Users & RBAC', icon: Users, count: realUsers.length || 5 },
-    { id: 'internal_staff', label: 'Internal P3L Staff', icon: Briefcase, count: 3 },
-    { id: 'comms_messaging', label: 'Messaging', icon: MessageSquare },
-    { id: 'support_ticketing', label: 'Support & Ticketing', icon: HelpCircle },
-    { id: 'system_wipe', label: 'System Wipes', icon: Settings },
+    { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutDashboard },
+    { id: 'karani_erp', label: 'Law Practice ERP', icon: Scale, badge: 'Practice' },
+    { id: 'projects_clients', label: 'Matters & Retainers', icon: Briefcase, count: projects.length },
+    { id: 'client_crm', label: 'Client Directory CRM', icon: UserCheck, count: 5 },
+    { id: 'finance_billing', label: 'Revenue & Remittance', icon: DollarSign },
+    { id: 'operations_log', label: 'Audit Trail & Operations', icon: Activity, badge: 'Secured' },
+    { id: 'users_rbac', label: 'Advocates & Permissions', icon: Users, count: realUsers.length || 5 },
+    { id: 'comms_messaging', label: 'Client Correspondence', icon: MessageSquare },
+    { id: 'support_ticketing', label: 'IT & Practice Helpdesk', icon: HelpCircle },
   ];
 
   return (
