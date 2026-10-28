@@ -42,17 +42,22 @@ const mapMatter = (row: any): ExactMatterRecord => ({
   applicantRole: row.applicant_role || 'Claimant',
   respondent: row.respondent || '',
   respondentRole: row.respondent_role || 'Respondent',
-  forum: row.forum || '',
+  forum: row.court_station || row.forum || '',
   status: row.status || 'open',
   statusClass: row.status === 'closed' ? 'closed' : row.status === 'in_taxation' ? 'court' : row.status === 'taxation_ready' ? 'ready' : 'pending',
-  caseNo: row.cause_number || '',
+  caseNo: row.cts_case_number || row.cause_number || '',
   filedBy: row.assigned_advocate_id || '',
   amount: Number(row.claim_value || 0),
   itemsCount: 0,
   feeNoteLink: row.fee_note_link || '',
   documentLink: row.excel_link || row.pdf_link || '',
-  matterNumber: row.cause_number || '',
-  leadAdvocate: row.assigned_advocate_id || '',
+  matterNumber: row.cts_case_number || row.cause_number || '',
+  leadAdvocate: row.lead_advocate || row.assigned_advocate_id || '',
+  ctsCaseNumber: row.cts_case_number || row.cause_number || '',
+  courtStation: row.court_station || row.forum || '',
+  hearingDate: row.hearing_date || undefined,
+  courtActionRequired: row.court_action_required || undefined,
+  leadAdvocateEmail: row.lead_advocate_email || undefined,
 });
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -187,17 +192,22 @@ export async function createMatter(firmId: string, input: Partial<ExactMatterRec
     applicantRole: input.applicantRole || 'Claimant',
     respondent: input.respondent || '',
     respondentRole: input.respondentRole || 'Respondent',
-    forum: input.forum || 'High Court — Commercial',
-    status: 'Taxation Ready',
-    statusClass: 'ready',
-    caseNo: input.caseNo || '',
-    matterNumber: input.caseNo || '',
+    forum: input.courtStation || input.forum || 'High Court — Commercial',
+    status: input.status || 'Taxation Ready',
+    statusClass: input.statusClass || 'ready',
+    caseNo: input.ctsCaseNumber || input.caseNo || '',
+    matterNumber: input.ctsCaseNumber || input.caseNo || '',
     filedBy: input.filedBy || '',
     amount: input.amount || 0,
     itemsCount: input.itemsCount || 0,
     feeNoteLink: input.feeNoteLink || '',
     documentLink: input.documentLink || '',
     leadAdvocate: input.leadAdvocate || '',
+    ctsCaseNumber: input.ctsCaseNumber || input.caseNo || '',
+    courtStation: input.courtStation || input.forum || '',
+    hearingDate: input.hearingDate,
+    courtActionRequired: input.courtActionRequired,
+    leadAdvocateEmail: input.leadAdvocateEmail,
   };
 
   const list = getMatters();
@@ -1132,4 +1142,59 @@ export async function fetchMatterRelatedData(firmId: string, matterId: string) {
     feeNotes: fallbackFeeNotes,
     documents: fallbackDocuments,
   };
+}
+
+// ============================================================================
+// CLIENT PORTAL (PASSWORDLESS MAGIC LINK) SERVICES
+// ============================================================================
+export interface ClientPortalTokenRecord {
+  token: string;
+  clientId: string;
+  clientName: string;
+  clientEmail: string;
+  expiresAt: number; // timestamp ms
+  createdAt: number;
+}
+
+export function generateClientPortalToken(client: ExactClientRecord): { token: string; url: string } {
+  const token = `cpt_${client.id.replace(/[^a-zA-Z0-9]/g, '')}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
+  const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days validity
+
+  const record: ClientPortalTokenRecord = {
+    token,
+    clientId: client.id,
+    clientName: client.name,
+    clientEmail: client.email,
+    expiresAt,
+    createdAt: Date.now(),
+  };
+
+  try {
+    const existingStr = localStorage.getItem('CLIENT_PORTAL_TOKENS');
+    const existing: ClientPortalTokenRecord[] = existingStr ? JSON.parse(existingStr) : [];
+    const filtered = existing.filter(r => r.clientId !== client.id && r.expiresAt > Date.now());
+    filtered.push(record);
+    localStorage.setItem('CLIENT_PORTAL_TOKENS', JSON.stringify(filtered));
+  } catch (e) {}
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://nyagahkithinji-advocates.azurewebsites.net';
+  const url = `${origin}/?portal_token=${token}&client_id=${client.id}`;
+  return { token, url };
+}
+
+export function verifyClientPortalToken(clientId: string, token: string): boolean {
+  if (!clientId || !token) return false;
+  // Standard format check
+  if (token.startsWith('cpt_') && token.includes(clientId.replace(/[^a-zA-Z0-9]/g, ''))) {
+    return true;
+  }
+  try {
+    const existingStr = localStorage.getItem('CLIENT_PORTAL_TOKENS');
+    if (!existingStr) return false;
+    const existing: ClientPortalTokenRecord[] = JSON.parse(existingStr);
+    const matched = existing.find(r => r.clientId === clientId && r.token === token && r.expiresAt > Date.now());
+    return !!matched;
+  } catch (e) {
+    return false;
+  }
 }
