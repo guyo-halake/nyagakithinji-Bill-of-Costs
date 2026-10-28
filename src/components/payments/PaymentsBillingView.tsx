@@ -27,7 +27,8 @@ import {
   getFeeNotes,
   persistFeeNotes,
   ExactFeeNoteRecord,
-  EXACT_FIRM_INFO
+  EXACT_FIRM_INFO,
+  getActiveFirmProfile
 } from '../../services/supabase';
 
 interface PaymentRecord {
@@ -641,6 +642,12 @@ export const PaymentsBillingView: React.FC<PaymentsBillingViewProps> = ({ curren
                             <button
                               onClick={() => {
                                 setSelectedNote(note);
+    if (note.grandTotal > 250000) {
+      setPaymentMode('manual');
+      setManualMethod('bank_transfer');
+    } else {
+      setPaymentMode('mpesa');
+    }
                                 setClientPhone('07');
                                 setProcessStatusMessage('');
                               }}
@@ -808,39 +815,39 @@ export const PaymentsBillingView: React.FC<PaymentsBillingViewProps> = ({ curren
               <div className="grid grid-cols-3 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-zinc-800">
                 <button
                   type="button"
+                  onClick={() => setPaymentMode('manual')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    paymentMode === 'manual'
+                      ? 'bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 shadow-xs font-bold'
+                      : 'text-slate-600 dark:text-zinc-400'
+                  }`}
+                >
+                  <Landmark className="w-3.5 h-3.5" />
+                  <span>Bank Wire / RTGS</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPaymentMode('mpesa')}
                   className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     paymentMode === 'mpesa'
-                      ? 'bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      ? 'bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-xs font-bold'
                       : 'text-slate-600 dark:text-zinc-400'
                   }`}
                 >
                   <Smartphone className="w-3.5 h-3.5" />
-                  <span>M-Pesa STK</span>
+                  <span>M-Pesa Mobile</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPaymentMode('card')}
                   className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     paymentMode === 'card'
-                      ? 'bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                      ? 'bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs font-bold'
                       : 'text-slate-600 dark:text-zinc-400'
                   }`}
                 >
                   <CreditCard className="w-3.5 h-3.5" />
                   <span>Card / Visa</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentMode('manual')}
-                  className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    paymentMode === 'manual'
-                      ? 'bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400'
-                  }`}
-                >
-                  <Receipt className="w-3.5 h-3.5" />
-                  <span>Record Offline</span>
                 </button>
               </div>
 
@@ -883,10 +890,19 @@ export const PaymentsBillingView: React.FC<PaymentsBillingViewProps> = ({ curren
                     </span>
                   </div>
 
+                  {selectedNote.grandTotal > 250000 && (
+                    <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Safaricom M-Pesa Limit Notice:</strong> M-Pesa caps single transactions at KES 250,000. Total due is KES {selectedNote.grandTotal.toLocaleString('en-KE')}. Please use <strong>Bank Wire / RTGS</strong> for this fee note.
+                      </div>
+                    </div>
+                  )}
+
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-[var(--border-color)] text-slate-500 text-[11px] space-y-1">
                     <div className="flex justify-between">
-                      <span>Business Shortcode / Paybill:</span>
-                      <span className="font-mono font-bold text-slate-900 dark:text-white">174379 (Daraja Sandbox) / 522522</span>
+                      <span>Firm M-Pesa Paybill:</span>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">{firmSettings.mpesaPaybill || '522522'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Account Reference:</span>
@@ -945,9 +961,28 @@ export const PaymentsBillingView: React.FC<PaymentsBillingViewProps> = ({ curren
                 </form>
               )}
 
-              {/* OPTION 3: MANUAL SETTLEMENT RECORDING */}
+              {/* OPTION 1: BANK WIRE / RTGS / EFT SETTLEMENT RECORDING */}
               {paymentMode === 'manual' && (
                 <form onSubmit={handleRecordManualPayment} className="space-y-3.5">
+                  {/* Law Firm Bank Remittance Instructions */}
+                  <div className="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/20 border border-purple-200/60 dark:border-purple-800/40 text-[11px] text-purple-900 dark:text-purple-300 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Landmark className="w-3.5 h-3.5" />
+                      <span>{firmSettings.topbarTitle || firmSettings.name} Bank Remittance Details:</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-2 pt-1 font-mono text-[10.5px]">
+                      <div>Office Bank: <span className="font-bold">{firmSettings.officeBankName || 'Standard Chartered'}</span></div>
+                      <div>A/C No: <span className="font-bold">{firmSettings.officeAccountNo || '0108012345600'}</span></div>
+                      <div>Branch: <span>{firmSettings.officeBranch || 'Upper Hill'}</span></div>
+                      <div>Swift: <span className="font-bold">{firmSettings.officeSwift || 'SCBLKENX'}</span></div>
+                    </div>
+                    {firmSettings.clientTrustAccountNo && (
+                      <div className="pt-1 text-[10px] text-slate-500 dark:text-zinc-400 border-t border-purple-200/40 mt-1">
+                        Client Trust / Escrow A/C: <strong>{firmSettings.clientTrustBankName}</strong> — A/C: <strong>{firmSettings.clientTrustAccountNo}</strong>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-mono uppercase text-slate-500 mb-1">Payment Rail</label>
