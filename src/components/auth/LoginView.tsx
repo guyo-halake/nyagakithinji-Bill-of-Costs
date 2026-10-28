@@ -62,7 +62,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onForgotPa
   const handleForgotPassword = async () => {
     const targetInput = email.trim();
     if (!targetInput) {
-      setErrorMessage('Please enter your registered email address in the field above, then click Forgot Password.');
+      setErrorMessage('Please enter your registered Email, Username, or Phone in the field above, then click Forgot Password.');
       setSuccessNotice('');
       return;
     }
@@ -71,52 +71,176 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onForgotPa
     setErrorMessage('');
     setSuccessNotice('');
 
-    // Attempt to lookup advocate's full name and registered email from roster
-    let advocateName = '';
-    let resolvedEmail = targetInput;
     try {
-      const stored = localStorage.getItem('EXACT_USERS');
-      const cachedUsers: SystemUser[] = stored ? JSON.parse(stored) : [];
-      const { SEEDED_USERS } = await import('../../services/supabase');
-      const allUsers = [...cachedUsers, ...SEEDED_USERS];
-
       const cleanTarget = targetInput.toLowerCase();
-      const matched = allUsers.find(
-        u => u.workEmail?.toLowerCase() === cleanTarget ||
-             u.personalEmail?.toLowerCase() === cleanTarget ||
-             u.fullName?.toLowerCase().includes(cleanTarget) ||
-             (u.phonePrimary && u.phonePrimary.replace(/[^0-9]/g, '').includes(cleanTarget.replace(/[^0-9]/g, ''))) ||
-             (u.workEmail && u.workEmail.toLowerCase().startsWith(cleanTarget))
-      );
-      if (matched) {
-        advocateName = matched.fullName;
-        if (matched.workEmail) {
-          resolvedEmail = matched.workEmail;
+      const cleanHandle = cleanTarget.replace(/^@/, '');
+      const numericTarget = cleanTarget.replace(/[^0-9]/g, '');
+
+      let matchedUser: SystemUser | null = null;
+
+      // 1. Authoritative lookup in Supabase public.users table
+      try {
+        const { data: dbRows, error: dbErr } = await supabase
+          .from('users')
+          .select('*')
+          .eq('is_active', true);
+
+        if (!dbErr && dbRows && dbRows.length > 0) {
+          for (const row of dbRows) {
+            const rowEmail = (row.email || '').trim().toLowerCase();
+            const rowUsername = (row.username || rowEmail.split('@')[0] || '').trim().toLowerCase();
+            const rowName = (row.full_name || '').trim().toLowerCase();
+            const phone1 = (row.phone_primary || '').replace(/[^0-9]/g, '');
+            const phone2 = (row.phone_secondary || '').replace(/[^0-9]/g, '');
+
+            if (
+              rowEmail === cleanTarget ||
+              rowUsername === cleanHandle ||
+              rowUsername === cleanTarget ||
+              rowName === cleanTarget ||
+              (numericTarget.length >= 7 && (phone1.includes(numericTarget.slice(-9)) || phone2.includes(numericTarget.slice(-9))))
+            ) {
+              matchedUser = {
+                id: row.id,
+                authUserId: row.auth_user_id || undefined,
+                firmId: row.firm_id,
+                fullName: row.full_name,
+                advocateTitle: row.full_name,
+                lskNo: row.lsk_no || '',
+                role: row.role === 'admin' ? 'Admin' : row.role === 'developer' ? 'Developer' : 'Advocate',
+                position: row.position || row.role,
+                workEmail: row.email,
+                personalEmail: row.email,
+                phonePrimary: row.phone_primary || '',
+                phoneSecondary: row.phone_secondary || '',
+                hasAllPermissions: row.role === 'admin' || row.role === 'developer',
+                passwordHash: '',
+              };
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Supabase users query notice:', e);
+      }
+
+      // 2. Lookup in backend /api/v1/users if not matched yet
+      if (!matchedUser) {
+        try {
+          const apiRes = await fetch('/api/v1/users');
+          if (apiRes.ok) {
+            const apiData = await apiRes.json();
+            const users = apiData?.users || [];
+            for (const u of users) {
+              const wEmail = (u.workEmail || '').trim().toLowerCase();
+              const pEmail = (u.personalEmail || '').trim().toLowerCase();
+              const uName = (u.username || '').trim().toLowerCase();
+              const fName = (u.fullName || '').trim().toLowerCase();
+              const handle = wEmail.split('@')[0] || '';
+              const phone1 = (u.phonePrimary || '').replace(/[^0-9]/g, '');
+              const phone2 = (u.phoneSecondary || '').replace(/[^0-9]/g, '');
+
+              if (
+                wEmail === cleanTarget ||
+                pEmail === cleanTarget ||
+                uName === cleanHandle ||
+                handle === cleanHandle ||
+                fName === cleanTarget ||
+                (numericTarget.length >= 7 && (phone1.includes(numericTarget.slice(-9)) || phone2.includes(numericTarget.slice(-9))))
+              ) {
+                matchedUser = {
+                  id: u.id,
+                  fullName: u.fullName,
+                  username: u.username || wEmail.split('@')[0],
+                  advocateTitle: u.advocateTitle || u.fullName,
+                  lskNo: u.lskNo || '',
+                  role: u.role || 'Advocate',
+                  position: u.position || 'Advocate',
+                  workEmail: u.workEmail,
+                  personalEmail: u.personalEmail || u.workEmail,
+                  phonePrimary: u.phonePrimary || '',
+                  phoneSecondary: u.phoneSecondary || '',
+                  hasAllPermissions: u.hasAllPermissions,
+                  passwordHash: '',
+                  firmId: u.firmId || 'firm-001',
+                };
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Backend users API query notice:', e);
         }
       }
-    } catch (e) {}
 
-    try {
-      const publicAppUrl = (import.meta as ImportMeta & { env?: { VITE_PUBLIC_APP_URL?: string } }).env?.VITE_PUBLIC_APP_URL || window.location.origin;
+      // 3. Fallback to cached firm roster only if still not matched
+      if (!matchedUser) {
+        const stored = localStorage.getItem('EXACT_USERS');
+        const cachedUsers: SystemUser[] = stored ? JSON.parse(stored) : [];
+        const { SEEDED_USERS } = await import('../../services/supabase');
+        const allUsers = [...cachedUsers, ...SEEDED_USERS];
+
+        for (const u of allUsers) {
+          const wEmail = (u.workEmail || '').trim().toLowerCase();
+          const pEmail = (u.personalEmail || '').trim().toLowerCase();
+          const uName = (u.username || '').trim().toLowerCase();
+          const fName = (u.fullName || '').trim().toLowerCase();
+          const handle = wEmail.split('@')[0] || '';
+          const phone1 = (u.phonePrimary || '').replace(/[^0-9]/g, '');
+          const phone2 = (u.phoneSecondary || '').replace(/[^0-9]/g, '');
+
+          if (
+            wEmail === cleanTarget ||
+            pEmail === cleanTarget ||
+            uName === cleanHandle ||
+            handle === cleanHandle ||
+            fName === cleanTarget ||
+            (numericTarget.length >= 7 && (phone1.includes(numericTarget.slice(-9)) || phone2.includes(numericTarget.slice(-9))))
+          ) {
+            matchedUser = u;
+            break;
+          }
+        }
+      }
+
+      // 4. CRITICAL VERIFICATION: User MUST exist in the database roster
+      if (!matchedUser) {
+        setErrorMessage(`Account "${targetInput}" was not found in the firm database. Only registered firm users can reset credentials.`);
+        setSuccessNotice('');
+        setIsSubmittingReset(false);
+        return;
+      }
+
+      const resolvedEmail = (matchedUser.workEmail || matchedUser.personalEmail || (matchedUser as any).email || '').trim().toLowerCase();
+      if (!resolvedEmail || !resolvedEmail.includes('@')) {
+        setErrorMessage(`User account "${matchedUser.fullName}" does not have a valid registered email in the database.`);
+        setSuccessNotice('');
+        setIsSubmittingReset(false);
+        return;
+      }
+
+      // 5. Send Supabase password reset link ONLY to the verified user's registered email
+      // Enforce the production URL (https://nyagahkithinji-advocates.azurewebsites.net) so reset links never route to localhost
+      const productionAppUrl = 'https://nyagahkithinji-advocates.azurewebsites.net';
       const { error: sbError } = await supabase.auth.resetPasswordForEmail(resolvedEmail, {
-        redirectTo: `${publicAppUrl}/reset-password`,
+        redirectTo: `${productionAppUrl}/reset-password`,
       });
 
       if (sbError) {
         throw sbError;
       }
 
-      // Also dispatch background email confirmation/ticket asynchronously
+      // 6. Background email dispatch for this specific user (using production URL)
       try {
         fetch('/api/v1/email/password-reset-request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: resolvedEmail,
-            full_name: advocateName || undefined,
-            username: resolvedEmail.split('@')[0],
+            full_name: matchedUser.fullName,
+            username: matchedUser.username || resolvedEmail.split('@')[0],
             firm_name: EXACT_FIRM_INFO.name,
-            portal_url: window.location.origin,
+            portal_url: productionAppUrl,
           }),
         }).catch(() => {});
       } catch (_) {}
@@ -124,7 +248,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onForgotPa
       setSuccessNotice(`A secure Supabase password reset link has been dispatched to ${resolvedEmail}. Please check your inbox to set your new password.`);
       setErrorMessage('');
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Failed to dispatch reset link. Please check your email address.');
+      setErrorMessage(err?.message || 'Failed to dispatch reset link. Please check your email address or connection.');
     } finally {
       setIsSubmittingReset(false);
     }
