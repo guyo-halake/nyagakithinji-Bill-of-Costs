@@ -16,7 +16,15 @@ export const DocumentVerifyView: React.FC<DocumentVerifyViewProps> = ({ onNaviga
   const [tokenInput, setTokenInput] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const activeFirm = getActiveFirmProfile();
+  const [activeFirm, setActiveFirm] = useState(() => getActiveFirmProfile());
+
+  useEffect(() => {
+    const handleFirmChange = () => {
+      setActiveFirm(getActiveFirmProfile());
+    };
+    window.addEventListener('firmSettingsChanged', handleFirmChange);
+    return () => window.removeEventListener('firmSettingsChanged', handleFirmChange);
+  }, []);
 
   const [verificationResult, setVerificationResult] = useState<{
     status: 'authentic' | 'tampered' | 'not_found' | 'idle';
@@ -240,7 +248,7 @@ export const DocumentVerifyView: React.FC<DocumentVerifyViewProps> = ({ onNaviga
                   CERTIFIED &amp; APPROVED BILL OF COSTS / FEE NOTE
                 </p>
                 <p className="text-[10px] text-slate-500 font-mono">
-                  LSK Practicing Roll: ADMIN/2026/001 &bull; KRA PIN: {activeFirm.kraPin || 'P051123456Z'}
+                  LSK Practicing Roll: {activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'} &bull; KRA PIN: {activeFirm.kraPin || 'P051123456Z'}
                 </p>
               </div>
             </div>
