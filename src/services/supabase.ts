@@ -178,6 +178,7 @@ export interface FirmProfile {
   name: string;
   title: string;
   firmRegNo: string;
+  lskRegNo?: string;
   managingPartner: string;
   managingPartnerLsk?: string;
   managingPartnerEmail?: string;
@@ -235,6 +236,7 @@ export const getActiveFirmProfile = (): FirmProfile => {
         name,
         title: p.topbarSubtitle || p.title || (EXACT_FIRM_INFO as any).title || 'Advocates of the High Court of Kenya',
         firmRegNo: p.lskRegNo || p.firmRegNo || (EXACT_FIRM_INFO as any).firmRegNo || 'P.105/1992',
+        lskRegNo: p.lskRegNo || p.firmRegNo || (EXACT_FIRM_INFO as any).firmRegNo || 'P.105/1992',
         managingPartner: p.managingPartner || (EXACT_FIRM_INFO as any).managingPartner || 'Managing Partner',
         managingPartnerLsk: p.lskRegNo || p.managingPartnerLsk || (EXACT_FIRM_INFO as any).managingPartnerLsk || 'P.105/1992',
         managingPartnerEmail: p.email || EXACT_FIRM_INFO.email,
@@ -275,6 +277,7 @@ export const getActiveFirmProfile = (): FirmProfile => {
   return {
     ...(EXACT_FIRM_INFO as any),
     title: (EXACT_FIRM_INFO as any).title || 'Advocates of the High Court of Kenya',
+    lskRegNo: (EXACT_FIRM_INFO as any).firmRegNo || 'P.105/1992',
     bankName: 'KCB Bank Kenya Ltd',
     bankBranch: 'Kilimani Branch',
     bankAccount: '1104889922',
