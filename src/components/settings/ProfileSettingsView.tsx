@@ -562,6 +562,7 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
         avatarUrl: userAvatarUrl || currentUser?.avatarUrl || active.avatarUrl,
         role: currentUser?.role || active.role || 'Admin',
         hasAllPermissions: true,
+        passwordHash: currentUser?.passwordHash || (active as any)?.passwordHash || 'Nyagah@2026',
         firmId: currentUser?.firmId || active.firmId || 'a0000000-0000-0000-0000-000000000001'
       };
 
@@ -1410,7 +1411,8 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
             
             {/* Firm Banner & Identity Header */}
             <div className="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-6 pb-6 border-b border-[var(--border-color)]/60">
-              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 text-center sm:text-left">
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left">
+                {/* Letterhead Logo */}
                 <div className="relative group shrink-0">
                   <img
                     src={firmSettings.logoUrl || '/logo.png'}
@@ -1419,15 +1421,39 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
                       e.currentTarget.onerror = null;
                       e.currentTarget.src = '/logo.png';
                     }}
-                    className="h-20 max-w-[200px] w-auto object-contain p-2 rounded-2xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)] shadow-xs"
+                    className="h-20 max-w-[160px] w-auto object-contain p-2 rounded-2xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)] shadow-xs"
                   />
                   {isEditingFirm && (
                     <button
+                      type="button"
                       onClick={() => logoInputRef.current?.click()}
                       className="absolute inset-0 bg-black/40 text-white rounded-2xl flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-bold"
                     >
                       <Camera className="w-5 h-5 mb-0.5" />
                       Change Logo
+                    </button>
+                  )}
+                </div>
+
+                {/* Official Firm Stamp */}
+                <div className="relative group shrink-0">
+                  <img
+                    src={firmSettings.stampUrl || '/stamp.png'}
+                    alt="Official Firm Stamp"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = '/stamp.png';
+                    }}
+                    className="h-20 max-w-[110px] w-auto object-contain p-1.5 rounded-2xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)] shadow-xs"
+                  />
+                  {isEditingFirm && (
+                    <button
+                      type="button"
+                      onClick={() => stampInputRef.current?.click()}
+                      className="absolute inset-0 bg-black/40 text-white rounded-2xl flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-bold"
+                    >
+                      <Upload className="w-5 h-5 mb-0.5" />
+                      Change Stamp
                     </button>
                   )}
                 </div>
@@ -1468,6 +1494,13 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
                       className="px-3 py-2 rounded-xl text-xs font-medium border border-[var(--border-color)] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                     >
                       Upload Logo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => stampInputRef.current?.click()}
+                      className="px-3 py-2 rounded-xl text-xs font-medium border border-[var(--border-color)] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    >
+                      Upload Stamp
                     </button>
                     <button
                       type="button"
@@ -1712,6 +1745,82 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
               /* EDIT FIRM SETTINGS FORM */
               <div className="space-y-6">
                 
+                {/* Section 0: Letterhead Logo & Official Stamp */}
+                <div className="space-y-3 pb-4 border-b border-[var(--border-color)]/60">
+                  <h3 className="font-brand font-bold text-xs uppercase tracking-wider text-slate-500">
+                    Letterhead Crest & Official Advocate Seal / Stamp
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Logo Box */}
+                    <div className="p-3.5 rounded-xl border border-[var(--border-color)] bg-transparent space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                          Letterhead Crest / Logo
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">PNG / SVG / JPG</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={firmSettings.logoUrl || '/logo.png'}
+                          alt="Firm Logo"
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/logo.png'; }}
+                          className="h-14 w-auto max-w-[120px] object-contain p-1 border border-[var(--border-color)] rounded-lg bg-white dark:bg-zinc-800"
+                        />
+                        <div className="flex flex-col gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => logoInputRef.current?.click()}
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-100 cursor-pointer"
+                          >
+                            Upload Crest Logo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleResetLogo}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-mono border border-[var(--border-color)] text-slate-500 hover:bg-slate-50 dark:hover:bg-zinc-800 cursor-pointer"
+                          >
+                            Reset Logo
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stamp Box */}
+                    <div className="p-3.5 rounded-xl border border-[var(--border-color)] bg-transparent space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                          Advocate Official Stamp / Seal
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">Transparent PNG</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={firmSettings.stampUrl || '/stamp.png'}
+                          alt="Firm Stamp"
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/stamp.png'; }}
+                          className="h-14 w-auto max-w-[100px] object-contain p-1 border border-[var(--border-color)] rounded-lg bg-white dark:bg-zinc-800"
+                        />
+                        <div className="flex flex-col gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => stampInputRef.current?.click()}
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-100 cursor-pointer"
+                          >
+                            Upload Stamp PNG
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleResetStamp}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-mono border border-[var(--border-color)] text-slate-500 hover:bg-slate-50 dark:hover:bg-zinc-800 cursor-pointer"
+                          >
+                            Reset Stamp
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Section 1: Firm Identification */}
                 <div className="space-y-4">
                   <h3 className="font-brand font-bold text-xs uppercase tracking-wider text-slate-500">
