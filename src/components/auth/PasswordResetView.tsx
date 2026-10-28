@@ -98,10 +98,19 @@ export const PasswordResetView: React.FC<PasswordResetViewProps> = ({ onBackToLo
     setIsSaving(true);
 
     try {
-      // 1. Supabase Auth update (The official Supabase way)
-      const { error: authErr } = await supabase.auth.updateUser({ password });
-      if (authErr) {
-        throw new Error(authErr.message);
+      const productionAppUrl = 'https://nyagahkithinji-advocates.azurewebsites.net';
+      let supabaseUpdated = false;
+
+      // 1. Supabase Auth update (The official Supabase way when arriving from recovery session)
+      try {
+        const { error: authErr } = await supabase.auth.updateUser({ password });
+        if (!authErr) {
+          supabaseUpdated = true;
+        } else if (!token) {
+          throw new Error(authErr.message);
+        }
+      } catch (supaErr: any) {
+        if (!token) throw supaErr;
       }
 
       // 2. Direct Supabase public.users table update
@@ -112,19 +121,25 @@ export const PasswordResetView: React.FC<PasswordResetViewProps> = ({ onBackToLo
           .ilike('email', targetEmail);
       } catch (dbErr) {}
 
-      // 3. Dispatch confirmation & update via backend engine
+      // 3. Dispatch confirmation & update via backend engine (Admin API updates Supabase Auth if session wasn't active)
+      let backendUpdated = false;
       try {
-        await fetch('/api/v1/email/confirm-password-reset', {
+        const res = await fetch('/api/v1/email/confirm-password-reset', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: targetEmail,
             new_password: password,
             token: token || undefined,
-            portal_url: window.location.origin,
+            portal_url: productionAppUrl,
           }),
         });
+        if (res.ok) backendUpdated = true;
       } catch (_) {}
+
+      if (!supabaseUpdated && !backendUpdated && !token) {
+        throw new Error('Recovery session expired. Please request a new password reset link.');
+      }
 
       // 4. Update local roster cache if present
       try {
