@@ -28,3 +28,4 @@ services:
       - SMTP_FROM=p3lcodes@gmail.com
       - SMTP_USE_TLS=true
     restart: always
+
