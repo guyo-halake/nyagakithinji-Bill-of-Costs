@@ -49,6 +49,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
   const [clientFeeNotes, setClientFeeNotes] = useState<ExactFeeNoteRecord[]>([]);
   const [vaultFiles, setVaultFiles] = useState<ExactVaultFileRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'matters' | 'feenotes' | 'vault'>('matters');
+  const activeFirm = getActiveFirmProfile();
 
   // Interactive Modals
   const [isBankModalOpen, setIsBankModalOpen] = useState(false);
