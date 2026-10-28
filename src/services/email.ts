@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getActiveFirmProfile } from './supabase';
 import { getSavedEmailTemplates, renderTemplateText } from './emailTemplates';
 
 export type EmailCategory = 'firm_to_client' | 'lawyer_to_client' | 'internal' | 'developer_admin';
@@ -16,6 +16,7 @@ export async function sendEmail(input: {
   htmlBody?: string;
   category: EmailCategory;
   replyTo?: string;
+  senderName?: string;
   attachments?: EmailAttachmentInput[];
 }) {
   let accessToken: string | null = null;
@@ -39,6 +40,7 @@ export async function sendEmail(input: {
         ...input,
         html_body: input.htmlBody,
         reply_to: input.replyTo,
+        sender_name: input.senderName || getActiveFirmProfile().name,
         attachments: input.attachments?.map(a => ({
           filename: a.filename,
           content: a.content,
@@ -133,6 +135,42 @@ export async function sendWelcomeUserEmail(payload: {
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.detail || 'Failed to dispatch welcome email');
+  }
+
+  return await response.json();
+}
+
+
+export async function sendHearingReminderEmail(payload: {
+  matterId: string;
+  matterTitle: string;
+  ctsCaseNumber: string;
+  courtStation: string;
+  hearingDate: string;
+  courtActionRequired: string;
+  leadAdvocateName: string;
+  leadAdvocateEmail: string;
+  portalUrl?: string;
+}) {
+  const response = await fetch('/api/v1/email/hearing-reminder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      matter_id: payload.matterId,
+      matter_title: payload.matterTitle,
+      cts_case_number: payload.ctsCaseNumber,
+      court_station: payload.courtStation,
+      hearing_date: payload.hearingDate,
+      court_action_required: payload.courtActionRequired,
+      lead_advocate_name: payload.leadAdvocateName,
+      lead_advocate_email: payload.leadAdvocateEmail,
+      portal_url: payload.portalUrl || 'https://nyagahkithinji-advocates.azurewebsites.net',
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to dispatch hearing reminder email');
   }
 
   return await response.json();
