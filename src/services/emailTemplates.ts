@@ -275,7 +275,7 @@ Suite 4B, Mbaruk Road, Nairobi, Kenya`,
     sampleData: {
       greeting: 'Good afternoon Victor Karani',
       username: 'vickarani',
-      resetUrl: 'https://kithinjiandco.vercel.app/reset-password?token=a8f9c0e2b1'
+      resetUrl: 'https://nyagahkithinji-advocates.azurewebsites.net/reset-password?token=a8f9c0e2b1'
     },
     plainText: `P3L Developers
 Email Support Helpdesk
@@ -335,7 +335,7 @@ This email was automated by P3L Helpdesk Delivery System. Please do not reply.`,
     sampleData: {
       greeting: 'Good afternoon Victor Karani',
       username: 'vickarani',
-      loginUrl: 'https://kithinjiandco.vercel.app'
+      loginUrl: 'https://nyagahkithinji-advocates.azurewebsites.net'
     },
     plainText: `P3L Developers
 Email Support Helpdesk
@@ -394,7 +394,7 @@ This email was automated by P3L Helpdesk Delivery System. Please do not reply.`,
       emailAddress: 'alexkaranivic@gmail.com',
       role: 'Senior Partner & Remuneration Lead',
       timestamp: '16 Oct 2026, 12:40 PM',
-      resetActionUrl: 'https://kithinjiandco.vercel.app'
+      resetActionUrl: 'https://nyagahkithinji-advocates.azurewebsites.net'
     },
     plainText: `P3L Developers
 Email Support Helpdesk
