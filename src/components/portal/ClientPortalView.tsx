@@ -7,7 +7,9 @@ import {
   getClients,
   getMatters,
   getFeeNotes,
-  EXACT_FIRM_INFO
+  EXACT_FIRM_INFO,
+  getActiveFirmProfile,
+  FirmProfile
 } from '../../services/supabase';
 import {
   Building2,
@@ -266,7 +268,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
 
       doc.setFont('times', 'normal');
       doc.setFontSize(9);
-      doc.text(`${EXACT_FIRM_INFO.name}`, 18, finalY + 15);
+      doc.text(`${activeFirm.name}`, 18, finalY + 15);
       doc.text(`Advocates of the High Court of Kenya | Upper Hill, Nairobi`, 18, finalY + 20);
 
       doc.save(`${fn.billNumber}_Fee_Note.pdf`);
@@ -426,7 +428,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-brand font-bold text-sm tracking-tight text-[var(--text-main)]">
-                  {EXACT_FIRM_INFO.name}
+                  {activeFirm.name}
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-[var(--border-color)]">
                   Client Portal
@@ -467,7 +469,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
             {/* Quick Action Header Buttons */}
             <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               <a
-                href={`mailto:${EXACT_FIRM_INFO.email}?subject=Client Portal Inquiry: ${encodeURIComponent(client?.name || '')}`}
+                href={`mailto:${activeFirm.email}?subject=Client Portal Inquiry: ${encodeURIComponent(client?.name || '')}`}
                 className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-subtle)] hover:bg-[var(--border-color)] text-[var(--text-main)] text-xs font-semibold transition-colors"
               >
                 <Mail className="w-3.5 h-3.5 text-slate-500" />
@@ -1001,7 +1003,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
 
       {/* FOOTER */}
       <footer className="mt-16 border-t border-[var(--border-color)] py-6 text-center text-xs text-[var(--text-muted)]">
-        <p>&copy; {new Date().getFullYear()} {EXACT_FIRM_INFO.name}. All Rights Reserved. Regulated by the Law Society of Kenya.</p>
+        <p>&copy; {new Date().getFullYear()} {activeFirm.name}. All Rights Reserved. Regulated by the Law Society of Kenya.</p>
         <p className="text-[10px] text-[var(--text-muted)] mt-1 font-mono">P3L Legal Vault Architecture &middot; High Court of Kenya Integrated</p>
       </footer>
 
