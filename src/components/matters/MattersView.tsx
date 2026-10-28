@@ -19,7 +19,8 @@ import {
   deleteMatter,
   fetchClients
 } from '../../services/data';
-import { sendEmail } from '../../services/email';
+import { sendEmail, sendHearingReminderEmail } from '../../services/email';
+import { checkConflictOfInterest } from '../../services/conflict';
 import { hasPermission } from '../../services/rbac';
 import {
   Plus,
@@ -46,7 +47,12 @@ import {
   Mail,
   Send,
   Share2,
-  Receipt
+  Receipt,
+  AlertTriangle,
+  Clock,
+  ShieldCheck,
+  Bell,
+  BellOff
 } from 'lucide-react';
 
 interface MattersViewProps {
@@ -86,6 +92,20 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
   const [newRespondent, setNewRespondent] = useState('');
   const [newClaimAmount, setNewClaimAmount] = useState<number>(0);
 
+  // Extended CTS inputs for New Matter
+  const [newCtsCaseNumber, setNewCtsCaseNumber] = useState('');
+  const [newCourtStation, setNewCourtStation] = useState('Milimani Commercial & Tax Division');
+  const [newHearingDate, setNewHearingDate] = useState('2026-11-05T09:30');
+  const [newCourtActionRequired, setNewCourtActionRequired] = useState('Mention to confirm compliance with pre-trial directions');
+  const [newLeadAdvocate, setNewLeadAdvocate] = useState('Karani Victor');
+  const [newLeadAdvocateEmail, setNewLeadAdvocateEmail] = useState('vickarani@gmail.com');
+
+  // Inline Advocate Picker State
+  const [assigningMatterId, setAssigningMatterId] = useState<string | null>(null);
+
+  // Reminder state per matter (toggled on/off)
+  const [reminderDisabledMap, setReminderDisabledMap] = useState<Record<string, boolean>>({});
+
   // Email Share Modal State
   const [emailShareMatter, setEmailShareMatter] = useState<ExactMatterRecord | null>(null);
   const [emailRecipient, setEmailRecipient] = useState('');
@@ -93,6 +113,86 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
   const [emailBody, setEmailBody] = useState('');
   const [isSendingMatterEmail, setIsSendingMatterEmail] = useState(false);
   const [shareToast, setShareToast] = useState('');
+
+  // Real-time Automated Conflict of Interest Checks for New Matter
+  const respondentConflict = React.useMemo(() => {
+    if (!newRespondent || newRespondent.trim().length < 3) return null;
+    return checkConflictOfInterest(newRespondent.trim(), { roleBeingAssigned: 'Respondent' });
+  }, [newRespondent]);
+
+  const applicantConflict = React.useMemo(() => {
+    if (!newApplicant || newApplicant.trim().length < 3) return null;
+    return checkConflictOfInterest(newApplicant.trim(), { roleBeingAssigned: 'Applicant' });
+  }, [newApplicant]);
+
+  const advocateRoster = [
+    { name: 'Karani Victor', email: 'vickarani@gmail.com' },
+    { name: 'Guyo Halake', email: 'guyohalakeofficial@gmail.com' },
+    { name: 'Nyagah Kithinji', email: 'advocate@kithinjilegal.co.ke' },
+    { name: 'Razak Wako', email: 'razak.admin@p3ldev.com' },
+  ];
+
+  // Minimalist Hearing Date & Countdown Formatter (strictly green for OK, red for overdue)
+  const formatHearingDateAndCountdown = (dateStr?: string) => {
+    if (!dateStr) {
+      return {
+        dateText: 'Date not set',
+        countdownText: 'No date scheduled',
+        isOverdue: false,
+      };
+    }
+
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) {
+      return {
+        dateText: dateStr,
+        countdownText: 'Scheduled',
+        isOverdue: false,
+      };
+    }
+
+    const dateText = d.toLocaleString('en-KE', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const now = Date.now();
+    const diffMs = d.getTime() - now;
+
+    if (diffMs <= 0) {
+      const overdueHours = Math.abs(Math.round(diffMs / (1000 * 60 * 60)));
+      const overdueDays = Math.floor(overdueHours / 24);
+      const countdownText = overdueDays > 0 ? `${overdueDays}d overdue` : `${overdueHours}h overdue`;
+      return {
+        dateText,
+        countdownText,
+        isOverdue: true,
+      };
+    }
+
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const days = Math.floor(diffHours / 24);
+    const remainingHours = diffHours % 24;
+
+    let countdownText = '';
+    if (days > 0) {
+      countdownText = remainingHours > 0 ? `${days}d ${remainingHours}h remaining` : `${days}d remaining`;
+    } else if (diffHours > 0) {
+      countdownText = `${diffHours}h remaining`;
+    } else {
+      const mins = Math.max(1, Math.floor(diffMs / (1000 * 60)));
+      countdownText = `${mins}m remaining`;
+    }
+
+    return {
+      dateText,
+      countdownText,
+      isOverdue: false,
+    };
+  };
 
   React.useEffect(() => {
     const handlePermissions = () => {
@@ -111,7 +211,6 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     const loadMatters = () => fetchMatters(firmId).then(setMattersList).catch(error => setErrorMessage(error.message || 'Unable to load matters.'));
     void loadMatters();
 
-    // Load fee notes and clients for automatic linkage
     fetchFeeNotesFromDatabase(firmId).then(setFeeNotes).catch(() => setFeeNotes(getFeeNotes()));
     fetchClients(firmId).then(setClients).catch(() => setClients(getClients()));
 
@@ -142,27 +241,6 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     };
   }, [currentUser?.firmId]);
 
-  // Auto-open targeted matter from Dashboard deep-link
-  React.useEffect(() => {
-    if (mattersList.length === 0) return;
-    const targetId = sessionStorage.getItem('OPEN_MATTER_ID');
-    const targetAction = sessionStorage.getItem('OPEN_MATTER_ACTION');
-    if (targetId) {
-      const found = mattersList.find(m => m.id === targetId || m.caseNo === targetId);
-      if (found) {
-        if (targetAction === 'edit') {
-          setEditingMatter(found);
-          setSelectedMatter(null);
-        } else {
-          setSelectedMatter(found);
-          setEditingMatter(null);
-        }
-      }
-      sessionStorage.removeItem('OPEN_MATTER_ID');
-      sessionStorage.removeItem('OPEN_MATTER_ACTION');
-    }
-  }, [mattersList]);
-
   // Load related dossier data when matter selected
   React.useEffect(() => {
     const firmId = currentUser?.firmId || 'firm-001';
@@ -187,7 +265,7 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
 
   // Helpers to resolve connected Fee Note and Client
   const getLinkedFeeNote = (m: ExactMatterRecord) => {
-    return feeNotes.find(fn => 
+    return feeNotes.find(fn =>
       (fn.matterId && fn.matterId === m.id) ||
       (fn.matterTitle && m.title && fn.matterTitle.toLowerCase().trim() === m.title.toLowerCase().trim()) ||
       (m.feeNoteLink && fn.billNumber === m.feeNoteLink)
@@ -202,38 +280,84 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     );
   };
 
-  // 1-Tap Bill of Costs generation deep link: opens connected fee note directly in Fee Note Builder!
-  const handleDraftBOC = (matter: ExactMatterRecord) => {
-    if (!onNavigateToBuilder) return;
-    const existing = getLinkedFeeNote(matter);
-    if (existing) {
-      onNavigateToBuilder(existing, false);
+  // Navigates directly to the read-only client portal for that matter
+  const handleMatterClick = (m: ExactMatterRecord) => {
+    const linkedFeeNote = getLinkedFeeNote(m);
+    const client = getLinkedClient(m, linkedFeeNote);
+    const targetClientId = client?.id || (
+      m.id.includes('safari') || m.applicant.toLowerCase().includes('safari') ? 'c-safari' :
+      m.id.includes('seyani') || m.applicant.toLowerCase().includes('seyani') ? 'c1' :
+      m.id.includes('dhanya') || m.applicant.toLowerCase().includes('dhanya') ? 'c2' :
+      m.id.includes('hccomm') || m.applicant.toLowerCase().includes('zhenjian') ? 'c4' :
+      'c1'
+    );
+
+    if (onNavigateTab) {
+      onNavigateTab('client_portal', targetClientId);
+    } else {
+      window.location.href = `/?portal_token=cpt_${targetClientId}&client_id=${targetClientId}`;
+    }
+  };
+
+  // Assign advocate to matter inline
+  const handleAssignAdvocate = async (matterId: string, advocate: { name: string; email: string }) => {
+    if (!currentUser?.firmId) return;
+    const target = mattersList.find(m => m.id === matterId);
+    if (!target) return;
+    const updated = {
+      ...target,
+      leadAdvocate: advocate.name || undefined,
+      leadAdvocateEmail: advocate.email || undefined,
+    };
+    try {
+      await updateMatter(currentUser.firmId, matterId, updated);
+      setMattersList(prev => prev.map(m => m.id === matterId ? updated : m));
+      setAssigningMatterId(null);
+      setShareToast(`Advocate ${advocate.name || 'unassigned'} updated for ${target.ctsCaseNumber || target.caseNo}`);
+      setTimeout(() => setShareToast(''), 3000);
+    } catch (e: any) {
+      setErrorMessage('Failed to assign advocate.');
+    }
+  };
+
+  // Toggle reminder or send 48h court reminder alert
+  const handleToggleOrSendReminder = async (matter: ExactMatterRecord) => {
+    const isCurrentlyOff = reminderDisabledMap[matter.id] === true;
+    if (isCurrentlyOff) {
+      setReminderDisabledMap(prev => ({ ...prev, [matter.id]: false }));
+      setShareToast(`Reminders enabled for ${matter.ctsCaseNumber || matter.caseNo}.`);
+      setTimeout(() => setShareToast(''), 3000);
       return;
     }
 
-    let schedule = 'schedule_6_high_court';
-    const f = (matter.forum || '').toLowerCase();
-    if (f.includes('magistrate') || f.includes('subordinate')) {
-      schedule = 'schedule_7_magistrate';
-    } else if (f.includes('arbitrat')) {
-      schedule = 'schedule_11_tribunals';
-    } else if (f.includes('conveyanc')) {
-      schedule = 'schedule_1_conveyancing';
-    } else if (f.includes('court of appeal') || f.includes('appellate')) {
-      schedule = 'schedule_8_court_of_appeal';
-    }
+    const advocateEmail = matter.leadAdvocateEmail || 'vickarani@gmail.com';
+    const advocateName = matter.leadAdvocate || 'Karani Victor';
+    const ctsNo = matter.ctsCaseNumber || matter.caseNo || 'CTS-PENDING';
+    const court = matter.courtStation || matter.forum || 'Milimani Law Courts';
+    const hearingTime = matter.hearingDate
+      ? new Date(matter.hearingDate).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' })
+      : matter.nextHearingDate || 'Upcoming Session';
 
-    onNavigateToBuilder({
-      matterId: matter.id,
-      matterTitle: matter.title,
-      caseNo: matter.caseNo,
-      clientName: matter.applicant,
-      claimValue: matter.amount,
-      courtSchedule: schedule,
-      forumName: matter.forum,
-      claimantName: matter.applicant,
-      respondentName: matter.respondent,
-    }, false);
+    try {
+      await sendHearingReminderEmail({
+        matterId: matter.id,
+        matterTitle: matter.title,
+        ctsCaseNumber: ctsNo,
+        courtStation: court,
+        hearingDate: hearingTime,
+        courtActionRequired: matter.courtActionRequired || 'Mention to confirm compliance with court directions',
+        leadAdvocateName: advocateName,
+        leadAdvocateEmail: advocateEmail,
+        portalUrl: 'https://nyagahkithinji-advocates.azurewebsites.net',
+      });
+      setShareToast(`Hearing reminder sent to ${advocateName} (${advocateEmail}).`);
+      setTimeout(() => setShareToast(''), 4000);
+    } catch (err: any) {
+      // Toggle off indicator
+      setReminderDisabledMap(prev => ({ ...prev, [matter.id]: true }));
+      setShareToast(`Reminder turned off for ${ctsNo}.`);
+      setTimeout(() => setShareToast(''), 3000);
+    }
   };
 
   // Filter matters by search & forum chip
@@ -242,6 +366,7 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     const matchesSearch =
       m.title.toLowerCase().includes(q) ||
       m.caseNo.toLowerCase().includes(q) ||
+      (m.ctsCaseNumber && m.ctsCaseNumber.toLowerCase().includes(q)) ||
       m.applicant.toLowerCase().includes(q) ||
       m.respondent.toLowerCase().includes(q) ||
       m.forum.toLowerCase().includes(q);
@@ -271,7 +396,6 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     setSelectedMatterIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  // Bulk status update
   const handleBulkStatus = async (newStatus: 'Active' | 'Concluded' | 'Stayed' | 'Pending Taxation') => {
     if (selectedMatterIds.length === 0 || !currentUser?.firmId) return;
     try {
@@ -313,6 +437,12 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     const newRecord: Partial<ExactMatterRecord> = {
       title: newTitle.trim(),
       caseNo: caseNumber,
+      ctsCaseNumber: newCtsCaseNumber.trim() || caseNumber,
+      courtStation: newCourtStation.trim(),
+      hearingDate: newHearingDate,
+      courtActionRequired: newCourtActionRequired.trim(),
+      leadAdvocate: newLeadAdvocate.trim(),
+      leadAdvocateEmail: newLeadAdvocateEmail.trim(),
       forum: newForum,
       applicant: newApplicant.trim() || 'Claimant',
       applicantRole: 'Claimant',
@@ -320,14 +450,13 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
       respondentRole: 'Respondent',
       amount: newClaimAmount,
       status: 'Active',
-      filedBy: currentUser?.fullName || 'Guyo Halake',
-      feeNoteLink: feeNoteBillNo
+      filedBy: currentUser?.fullName || newLeadAdvocate.trim(),
+      feeNoteLink: feeNoteBillNo,
     };
 
     try {
       const savedMatter = await createMatter(currentUser.firmId, newRecord);
 
-      // Automatically connect a draft Fee Note so all matters are connected to a fee note
       const baseInstruction = Math.max(75000, Math.round(savedMatter.amount * 0.05));
       const gettingUp = Math.round(baseInstruction / 3);
       const newFeeNote: ExactFeeNoteRecord = {
@@ -346,14 +475,12 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
         generatedByUser: currentUser?.fullName || 'Guyo Halake',
         generatedByUserId: currentUser?.id || 'usr-001',
         pdfUrl: '',
-        excelUrl: ''
+        excelUrl: '',
       };
 
       try {
         await saveFeeNoteToDatabase(newFeeNote);
-      } catch (err) {
-        console.warn('Auto fee note save note:', err);
-      }
+      } catch (err) {}
       const updatedNotes = [newFeeNote, ...feeNotes];
       setFeeNotes(updatedNotes);
       persistFeeNotes(updatedNotes);
@@ -362,6 +489,7 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
       setShowNewMatterModal(false);
       setNewTitle('');
       setNewCaseNo('');
+      setNewCtsCaseNumber('');
       setNewApplicant('');
       setNewRespondent('');
       setNewClaimAmount(0);
@@ -379,40 +507,28 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
         await deleteMatter(currentUser.firmId, id);
         setMattersList(prev => prev.filter(m => m.id !== id));
         if (selectedMatter?.id === id) setSelectedMatter(null);
-        if (editingMatter?.id === id) setEditingMatter(null);
-        setShareToast(`Matter "${title}" deleted successfully.`);
-        setTimeout(() => setShareToast(''), 3500);
-      } catch (error: any) {
-        setErrorMessage(error.message || 'Unable to delete matter.');
+      } catch (err: any) {
+        setErrorMessage(err.message || 'Unable to delete matter.');
       }
-      setActiveMenuId(null);
     }
   };
 
   const handleOpenEmailShare = (m: ExactMatterRecord) => {
     const linkedFn = getLinkedFeeNote(m);
-    const linkedC = getLinkedClient(m, linkedFn);
     setEmailShareMatter(m);
-    setEmailRecipient(linkedC?.email || '');
-    setEmailSubject(`Matter File: ${m.caseNo} — ${m.title}`);
+    setEmailRecipient(m.leadAdvocateEmail || '');
+    setEmailSubject(`Legal Matter File: ${m.ctsCaseNumber || m.caseNo} — ${m.title}`);
     setEmailBody(
-`Dear ${m.applicant || 'Client'},
+      `Dear ${m.applicant || 'Client'},
 
-Matter Title: ${m.title}
-Case Number: ${m.caseNo}
-Court Forum: ${m.forum}
-
-File Summary:
-• Claimant / Client: ${m.applicant}
-• Defendant: ${m.respondent}
-• Claim Amount: KES ${m.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-• Status: ${m.status}
-• Connected Fee Note: ${linkedFn ? linkedFn.billNumber : 'No fee note linked'}
-
-Please let us know if you require any additional documents or filings.
+Matter: ${m.title}
+Case Number: ${m.ctsCaseNumber || m.caseNo}
+Court Station: ${m.courtStation || m.forum}
+Hearing Date: ${m.hearingDate || m.nextHearingDate || 'Pending'}
+Claim Amount: KES ${m.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
 
 Best regards,
-${currentUser?.fullName || 'Karani Law Advocates'}`
+Nyagah B. Kithinji & Co. Advocates`
     );
   };
 
@@ -425,9 +541,9 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
         to: [emailRecipient.trim()],
         subject: emailSubject,
         body: emailBody,
-        category: 'firm_to_client'
+        category: 'firm_to_client',
       });
-      setShareToast(`Matter file emailed to ${emailRecipient.trim()} successfully!`);
+      setShareToast(`Matter file emailed to ${emailRecipient.trim()} successfully.`);
       setTimeout(() => setShareToast(''), 3500);
       setEmailShareMatter(null);
     } catch (err: any) {
@@ -437,66 +553,40 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
     }
   };
 
-  // High Court & Kenyan Forum badge formatter
-  const getKenyanCaseBadge = (caseNo: string, forum: string) => {
-    const f = (forum || '').toLowerCase();
-    const c = (caseNo || '').toUpperCase();
-    if (c.includes('HCCC') || f.includes('commercial')) {
-      return { tag: 'HCCC Commercial', style: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' };
-    }
-    if (c.includes('ELRC') || f.includes('employment') || f.includes('labour')) {
-      return { tag: 'ELRC Court', style: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' };
-    }
-    if (c.includes('ELC') || f.includes('land')) {
-      return { tag: 'ELC Court', style: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' };
-    }
-    if (c.includes('ARB') || f.includes('arbitrat') || c.includes('NCIA')) {
-      return { tag: 'NCIA Arbitration', style: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' };
-    }
-    if (f.includes('magistrate') || f.includes('subordinate') || c.includes('CMCC')) {
-      return { tag: 'Magistrate Court', style: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20' };
-    }
-    if (f.includes('conveyanc')) {
-      return { tag: 'Conveyancing', style: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' };
-    }
-    return { tag: 'High Court', style: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20' };
-  };
-
   const forumChips = [
-    { id: 'All', label: 'All Matters' },
-    { id: 'Commercial', label: 'Commercial High Court' },
+    { id: 'All', label: 'All' },
+    { id: 'Commercial', label: 'Commercial' },
     { id: 'ELC / ELRC', label: 'ELC / ELRC' },
-    { id: 'Magistrate', label: 'Magistrate Court' },
+    { id: 'Magistrate', label: 'Magistrate' },
     { id: 'Arbitration', label: 'Arbitration' },
-    { id: 'Conveyancing', label: 'Conveyancing' }
+    { id: 'Conveyancing', label: 'Conveyancing' },
   ];
 
   return (
-    <div className="space-y-4 pb-12">
-      {/* Header Banner - Standardized compact geometry matching Dashboard */}
+    <div className="space-y-4 pb-12 w-full">
+      {/* Title & Action Toolbar */}
       <div className="pt-1 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[var(--border-color)]/60">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="font-brand font-extrabold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
               Matters
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 font-mono text-xs font-semibold">
-              {mattersList.length} Active Causes
+            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-mono text-xs font-semibold border border-[var(--border-color)]">
+              {mattersList.length} Matters
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 font-sans">
-            High Court causes, subordinate courts, taxations &amp; arbitrations
+            Active litigation files, court hearings, and matters docket
           </p>
         </div>
 
-        {/* Consolidated Action Bar */}
         <div className="flex items-center gap-2.5 shrink-0">
           {can('matters.create') && (
             <button
               onClick={() => setShowNewMatterModal(true)}
-              className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-zinc-100 font-sans font-semibold text-xs flex items-center gap-2 transition-all shadow-sm cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-black dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 font-sans font-semibold text-xs flex items-center gap-2 transition-all shadow-xs cursor-pointer"
             >
-              <Plus className="w-4 h-4 text-amber-400" /> New Matter
+              <Plus className="w-4 h-4" /> Add Matter
             </button>
           )}
           {can('clients.view') && (
@@ -504,7 +594,7 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
               onClick={() => onNavigateTab ? onNavigateTab('clients') : null}
               className="px-4 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] text-[var(--text-main)] hover:bg-[var(--bg-subtle)] font-sans font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <Users className="w-4 h-4 text-slate-500" /> Clients Directory
+              <Users className="w-4 h-4 text-slate-500" /> Clients
             </button>
           )}
         </div>
@@ -519,19 +609,18 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by title, cause number, forum, party..."
-              className="w-full bg-[var(--bg-main)] border border-[var(--border-color)] rounded-xl pl-10 pr-3.5 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-amber-500/50 transition-colors shadow-2xs"
+              placeholder="Search case number, party, station..."
+              className="w-full bg-[var(--bg-main)] border border-[var(--border-color)] rounded-xl pl-10 pr-3.5 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-slate-400 transition-colors shadow-2xs"
             />
           </div>
 
-          {/* Bulk Selection Actions Bar */}
+          {/* Bulk Selection Actions */}
           {selectedMatterIds.length > 0 && (
-            <div className="flex items-center gap-2 bg-[var(--bg-subtle)] border border-amber-500/30 px-3 py-1.5 rounded-xl shadow-xs text-xs animate-in fade-in">
-              <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+            <div className="flex items-center gap-2 bg-[var(--bg-subtle)] border border-[var(--border-color)] px-3 py-1.5 rounded-xl shadow-xs text-xs animate-in fade-in">
+              <span className="font-mono font-semibold text-slate-800 dark:text-zinc-200">
                 {selectedMatterIds.length} selected
               </span>
               <span className="text-[var(--text-muted)]">|</span>
-              <span className="text-[11px] text-[var(--text-muted)] font-mono">Set:</span>
               <button
                 onClick={() => handleBulkStatus('Active')}
                 className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-[10px] font-bold hover:bg-emerald-500/20 cursor-pointer"
@@ -551,12 +640,6 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                 Concluded
               </button>
               <button
-                onClick={() => handleBulkStatus('Stayed')}
-                className="px-2 py-0.5 rounded bg-slate-500/10 text-slate-600 border border-slate-500/20 text-[10px] font-bold hover:bg-slate-500/20 cursor-pointer"
-              >
-                Stayed
-              </button>
-              <button
                 onClick={() => setSelectedMatterIds([])}
                 className="text-xs text-[var(--text-muted)] hover:text-red-500 ml-1 cursor-pointer"
               >
@@ -566,16 +649,16 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
           )}
         </div>
 
-        {/* 1-Tap Court Forum Filter Chips */}
+        {/* Forum Filter Chips */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
           {forumChips.map(chip => (
             <button
               key={chip.id}
               onClick={() => setForumFilter(chip.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                 forumFilter === chip.id
-                  ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs font-semibold'
-                  : 'bg-[var(--bg-main)] text-[var(--text-muted)] border border-[var(--border-color)] hover:text-[var(--text-main)] hover:border-slate-400'
+                  ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                  : 'bg-[var(--bg-main)] text-[var(--text-muted)] border border-[var(--border-color)] hover:text-[var(--text-main)]'
               }`}
             >
               {chip.label}
@@ -584,29 +667,23 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
         </div>
       </div>
 
-      {/* Error Message Alert */}
       {errorMessage && (
-        <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs flex items-center justify-between">
+        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMessage}</span>
           </div>
-          <button onClick={() => setErrorMessage('')} className="text-xs font-bold hover:underline">
-            Dismiss
-          </button>
+          <button onClick={() => setErrorMessage('')} className="text-xs font-bold hover:underline">&times;</button>
         </div>
       )}
 
-      {/* SUCCESS TOAST */}
       {shareToast && (
-        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between">
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{shareToast}</span>
           </div>
-          <button onClick={() => setShareToast('')} className="text-xs font-bold hover:underline">
-            &times;
-          </button>
+          <button onClick={() => setShareToast('')} className="text-xs font-bold hover:underline">&times;</button>
         </div>
       )}
 
@@ -614,7 +691,7 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
       <div className="w-full bg-[var(--bg-main)] rounded-2xl border border-[var(--border-color)] shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-[var(--text-main)] border-collapse">
-            <thead className="h-[40px] bg-[var(--bg-subtle)] text-[var(--text-muted)] uppercase text-[10px] font-mono tracking-wider border-b border-[var(--border-color)] font-semibold select-none">
+            <thead className="h-[42px] bg-[var(--bg-subtle)] text-[var(--text-muted)] uppercase text-[10px] font-mono tracking-wider border-b border-[var(--border-color)] font-semibold select-none">
               <tr>
                 <th className="py-3 px-3.5 w-10 text-center">
                   <button onClick={toggleSelectAll} className="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]">
@@ -625,20 +702,19 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                     )}
                   </button>
                 </th>
-                <th className="py-3 px-3.5">Case Number</th>
-                <th className="py-3 px-3.5 min-w-[200px]">Matter Title & Parties</th>
-                <th className="py-3 px-3.5">Connected Client</th>
-                <th className="py-3 px-3.5">Connected Fee Note</th>
-                <th className="py-3 px-3.5">Court Forum</th>
-                <th className="py-3 px-3.5 text-right font-mono">Claim Amount</th>
-                <th className="py-3 px-3.5 text-center">Status</th>
-                <th className="py-3 px-3.5 text-right min-w-[170px]">Actions</th>
+                <th className="py-3 px-3.5 min-w-[220px]">Case Number &amp; Parties</th>
+                <th className="py-3 px-3.5 min-w-[180px]">Court Station</th>
+                <th className="py-3 px-3.5 min-w-[200px]">Hearing Date</th>
+                <th className="py-3 px-3.5 min-w-[160px]">Connected Client</th>
+                <th className="py-3 px-3.5 min-w-[170px]">Assigned Advocate</th>
+                <th className="py-3 px-3.5 text-center min-w-[100px]">Status</th>
+                <th className="py-3 px-3.5 text-right min-w-[150px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-color)]">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-[var(--text-muted)] text-xs">
+                  <td colSpan={8} className="py-12 text-center text-[var(--text-muted)] text-xs">
                     No matters found matching your search.
                   </td>
                 </tr>
@@ -647,14 +723,17 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                   const isSelected = selectedMatterIds.includes(m.id);
                   const linkedFeeNote = getLinkedFeeNote(m);
                   const linkedClient = getLinkedClient(m, linkedFeeNote);
+                  const timing = formatHearingDateAndCountdown(m.hearingDate);
+                  const isReminderOff = reminderDisabledMap[m.id] === true;
 
                   return (
                     <tr
                       key={m.id}
-                      className={`hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer ${
+                      className={`hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer group ${
                         isSelected ? 'bg-slate-100/60 dark:bg-zinc-800/40' : ''
                       }`}
-                      onClick={() => setSelectedMatter(m)}
+                      onClick={() => handleMatterClick(m)}
+                      title="Click to open read-only client portal for this matter"
                     >
                       {/* Checkbox */}
                       <td className="py-3 px-3.5 text-center" onClick={(e) => e.stopPropagation()}>
@@ -670,64 +749,103 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                         </button>
                       </td>
 
-                      {/* Case Number */}
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <span className="font-mono font-bold text-xs text-[var(--text-main)] block">
-                          {m.caseNo}
+                      {/* Case Number & Parties */}
+                      <td className="py-3 px-3.5">
+                        <span className="font-mono font-bold text-xs text-[var(--text-main)] block group-hover:text-blue-600 transition-colors">
+                          {m.ctsCaseNumber || m.caseNo}
+                        </span>
+                        <span className="text-[11px] text-[var(--text-muted)] block mt-0.5 truncate max-w-[260px]">
+                          {m.applicant} v {m.respondent}
                         </span>
                       </td>
 
-                      {/* Title & Parties */}
-                      <td className="py-3 px-3.5">
-                        <strong className="font-bold text-xs text-[var(--text-main)] block line-clamp-1 hover:underline">
-                          {m.title}
-                        </strong>
-                        <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
-                          <span>{m.applicant}</span>
-                          <span className="mx-1 text-slate-400">vs</span>
-                          <span>{m.respondent}</span>
-                        </div>
+                      {/* Court Station */}
+                      <td className="py-3 px-3.5 whitespace-nowrap text-xs text-[var(--text-muted)]">
+                        <span className="truncate max-w-[180px] block font-medium text-[var(--text-main)]">
+                          {m.courtStation || m.forum}
+                        </span>
+                      </td>
+
+                      {/* Hearing Date & Countdown (Strictly Green for OK, Red for Overdue) */}
+                      <td className="py-3 px-3.5 whitespace-nowrap text-xs">
+                        <span className="font-semibold text-slate-900 dark:text-white block font-sans">
+                          {timing.dateText}
+                        </span>
+                        <span className={`block font-mono text-[11px] mt-0.5 ${
+                          timing.isOverdue
+                            ? 'text-rose-600 dark:text-rose-400 font-bold'
+                            : 'text-emerald-600 dark:text-emerald-400 font-medium'
+                        }`}>
+                          {timing.countdownText}
+                        </span>
                       </td>
 
                       {/* Connected Client */}
-                      <td className="py-3 px-3.5 whitespace-nowrap text-xs">
+                      <td className="py-3 px-3.5 whitespace-nowrap text-xs" onClick={(e) => e.stopPropagation()}>
                         {linkedClient ? (
-                          <div className="flex items-center gap-1.5 text-[var(--text-main)]">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                            <span className="font-medium truncate max-w-[150px]">{linkedClient.name}</span>
+                          <div className="font-medium text-[var(--text-main)] truncate max-w-[150px]">
+                            {linkedClient.name}
                           </div>
                         ) : (
-                          <span className="text-[var(--text-muted)] italic text-[11px]">No client linked</span>
+                          <span className="text-[var(--text-muted)] italic text-[11px]">{m.applicant}</span>
                         )}
-                      </td>
-
-                      {/* Connected Fee Note */}
-                      <td className="py-3 px-3.5 whitespace-nowrap text-xs" onClick={(e) => e.stopPropagation()}>
-                        {linkedFeeNote ? (
+                        {linkedFeeNote && (
                           <button
                             type="button"
                             onClick={() => {
                               if (onNavigateToBuilder) onNavigateToBuilder(linkedFeeNote, false);
                             }}
-                            className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-slate-800 dark:text-slate-200 hover:underline cursor-pointer"
-                            title="Open in Fee Note Builder"
+                            className="inline-flex items-center gap-1 font-mono text-[10px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:underline mt-0.5"
                           >
-                            <Receipt className="w-3 h-3 text-slate-500" />
+                            <Receipt className="w-3 h-3 text-slate-400" />
                             <span>{linkedFeeNote.billNumber}</span>
                           </button>
-                        ) : (
-                          <span className="text-[var(--text-muted)] italic text-[11px]">No fee note linked</span>
                         )}
                       </td>
 
-                      {/* Forum */}
-                      <td className="py-3 px-3.5 whitespace-nowrap text-xs text-[var(--text-muted)]">
-                        <span className="truncate max-w-[140px] block">{m.forum}</span>
-                      </td>
+                      {/* Assigned Advocate (Click to Assign) */}
+                      <td className="py-3 px-3.5 whitespace-nowrap text-xs relative" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => setAssigningMatterId(assigningMatterId === m.id ? null : m.id)}
+                          className="font-medium text-[var(--text-main)] hover:underline flex items-center gap-1.5 cursor-pointer text-left"
+                          title="Click to assign or change advocate"
+                        >
+                          {m.leadAdvocate ? (
+                            <span className="font-semibold text-slate-900 dark:text-white">{m.leadAdvocate}</span>
+                          ) : (
+                            <span className="text-slate-400 italic underline text-[11px]">Unassigned</span>
+                          )}
+                        </button>
 
-                      {/* Claim Value */}
-                      <td className="py-3 px-3.5 whitespace-nowrap text-right font-mono font-bold text-xs text-[var(--text-main)]">
-                        KES {m.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                        {/* Inline Advocate Picker */}
+                        {assigningMatterId === m.id && (
+                          <div className="absolute left-0 mt-1 w-52 rounded-xl bg-[var(--bg-main)] border border-[var(--border-color)] shadow-xl py-1 z-30 text-left">
+                            <div className="px-3 py-1 text-[10px] font-mono text-[var(--text-muted)] uppercase border-b border-[var(--border-color)]">
+                              Assign Lead Advocate
+                            </div>
+                            {advocateRoster.map(adv => (
+                              <button
+                                key={adv.email}
+                                type="button"
+                                onClick={() => handleAssignAdvocate(m.id, adv)}
+                                className={`w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--bg-subtle)] flex flex-col cursor-pointer ${
+                                  m.leadAdvocate === adv.name ? 'font-bold bg-slate-100 dark:bg-zinc-800' : ''
+                                }`}
+                              >
+                                <span className="text-[var(--text-main)]">{adv.name}</span>
+                                <span className="text-[10px] text-[var(--text-muted)] font-mono">{adv.email}</span>
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => handleAssignAdvocate(m.id, { name: '', email: '' })}
+                              className="w-full px-3 py-1.5 text-left text-xs text-rose-500 hover:bg-rose-500/10 cursor-pointer border-t border-[var(--border-color)]"
+                            >
+                              Clear Assignment
+                            </button>
+                          </div>
+                        )}
                       </td>
 
                       {/* Status */}
@@ -737,48 +855,57 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                         </span>
                       </td>
 
-                      {/* Direct Quick Action Buttons */}
+                      {/* Action Icons */}
                       <td className="py-3 px-3.5 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          {/* Draft Bill of Costs */}
+                          {/* Bell Icon: Reminder Status & Trigger */}
                           <button
                             type="button"
-                            onClick={() => handleDraftBOC(m)}
-                            className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-subtle)] hover:bg-slate-100 dark:hover:bg-zinc-800 text-[var(--text-main)] transition-colors text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                            title={linkedFeeNote ? `Open Fee Note (${linkedFeeNote.billNumber}) in Builder` : "Draft Bill of Costs in Builder"}
+                            onClick={() => handleToggleOrSendReminder(m)}
+                            className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer relative"
+                            title={isReminderOff ? "Reminder is OFF. Click to turn ON & send alert." : "Reminder is ON. Click to dispatch 48h alert or toggle."}
                           >
-                            <FileText className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                            <span className="hidden xl:inline">Draft Bill</span>
+                            {isReminderOff ? (
+                              <span className="relative flex items-center justify-center">
+                                <BellOff className="w-3.5 h-3.5 text-rose-500" />
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 absolute -top-0.5 -right-0.5" />
+                              </span>
+                            ) : (
+                              <span className="relative flex items-center justify-center">
+                                <Bell className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 absolute -top-0.5 -right-0.5" />
+                              </span>
+                            )}
                           </button>
 
-                          {/* Edit Matter */}
+                          {/* Share Icon */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEmailShare(m)}
+                            className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                            title="Share Matter File via Email"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Edit Icon */}
                           {can('matters.edit') && (
                             <button
                               type="button"
                               onClick={() => setEditingMatter(m)}
-                              className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors cursor-pointer"
-                              title="Edit Matter Information"
+                              className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                              title="Edit Matter"
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </button>
                           )}
 
-                          {/* Email Share */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEmailShare(m)}
-                            className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-blue-600 transition-colors cursor-pointer"
-                            title="Share Matter via Email"
-                          >
-                            <Mail className="w-3.5 h-3.5" />
-                          </button>
-
-                          {/* Delete Matter */}
+                          {/* Delete Icon */}
                           {can('matters.delete') && (
                             <button
                               type="button"
                               onClick={() => handleDeleteMatter(m.id, m.title)}
-                              className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-600 transition-colors cursor-pointer"
+                              className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-rose-500/10 text-[var(--text-muted)] hover:text-rose-600 transition-colors cursor-pointer"
                               title="Delete Matter"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -795,240 +922,15 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
         </div>
       </div>
 
-      {/* MATTER CAUSE DOSSIER (2-COLUMN HIGH-CONTRAST SLIDE-OVER MODAL) */}
-      {selectedMatter && (
-        <div className="fixed inset-0 bg-[#0b1b36]/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-50 overflow-y-auto">
-          <div className="bg-[var(--bg-main)] rounded-2xl border border-[var(--border-color)] max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
-            {/* Dossier Header */}
-            <div className="p-6 border-b border-[var(--border-color)] bg-[var(--bg-subtle)] flex items-start justify-between gap-4">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-2.5 py-1 rounded bg-[var(--bg-main)] border border-[var(--border-color)] font-mono text-xs font-bold text-[var(--text-main)]">
-                    {selectedMatter.caseNo}
-                  </span>
-                  <span className={`px-2.5 py-1 rounded text-[10px] font-mono font-bold border ${getKenyanCaseBadge(selectedMatter.caseNo, selectedMatter.forum).style}`}>
-                    {getKenyanCaseBadge(selectedMatter.caseNo, selectedMatter.forum).tag}
-                  </span>
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-mono text-[10px] font-bold">
-                    {selectedMatter.status}
-                  </span>
-                </div>
-                <h2 className="font-brand font-extrabold text-xl sm:text-2xl text-[var(--text-main)] leading-tight">
-                  {selectedMatter.title}
-                </h2>
-                <div className="flex items-center gap-3 text-xs text-[var(--text-muted)] font-mono">
-                  <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> {selectedMatter.forum}</span>
-                  <span>&bull;</span>
-                  <span>Advocate on Record: {selectedMatter.filedBy || 'Guyo Halake'}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {/* 1-Tap Bill of Costs Action */}
-                <button
-                  onClick={() => {
-                    handleDraftBOC(selectedMatter);
-                    setSelectedMatter(null);
-                  }}
-                  className="px-3.5 py-2 rounded-xl bg-amber-500 text-slate-950 font-sans font-bold text-xs flex items-center gap-1.5 hover:bg-amber-400 transition-all shadow-xs cursor-pointer"
-                >
-                  <FileText className="w-4 h-4" /> Draft Bill of Costs →
-                </button>
-                <button
-                  onClick={() => setSelectedMatter(null)}
-                  className="p-2 rounded-xl border border-[var(--border-color)] hover:bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* High-Contrast 2-Column Breakdown */}
-            <div className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
-              
-              {/* Left Column: Court Forum, Coram, Parties, Financials */}
-              <div className="space-y-6">
-                {/* Parties Matrix */}
-                <div className="space-y-3">
-                  <h3 className="font-mono text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
-                    <Scale className="w-3.5 h-3.5 text-amber-500" /> Cause Parties
-                  </h3>
-                  <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] space-y-3">
-                    <div className="p-3 rounded-lg border border-blue-500/20 bg-blue-500/5">
-                      <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 font-bold uppercase block mb-1">
-                        Plaintiff / Claimant ({selectedMatter.applicantRole || 'Applicant'})
-                      </span>
-                      <strong className="text-sm font-bold text-[var(--text-main)] block">
-                        {selectedMatter.applicant}
-                      </strong>
-                    </div>
-
-                    <div className="p-3 rounded-lg border border-red-500/20 bg-red-500/5">
-                      <span className="text-[10px] font-mono text-red-600 dark:text-red-400 font-bold uppercase block mb-1">
-                        Defendant / Respondent ({selectedMatter.respondentRole || 'Respondent'})
-                      </span>
-                      <strong className="text-sm font-bold text-[var(--text-main)] block">
-                        {selectedMatter.respondent}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Forum & Coram Breakdown */}
-                <div className="space-y-3">
-                  <h3 className="font-mono text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
-                    <Gavel className="w-3.5 h-3.5 text-blue-500" /> Court Forum & Coram
-                  </h3>
-                  <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] space-y-2.5">
-                    <div className="flex justify-between py-1 border-b border-[var(--border-color)]">
-                      <span className="text-[var(--text-muted)]">Judicial Forum:</span>
-                      <strong className="text-[var(--text-main)] font-mono">{selectedMatter.forum}</strong>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-[var(--border-color)]">
-                      <span className="text-[var(--text-muted)]">Registry Number:</span>
-                      <strong className="text-[var(--text-main)] font-mono">{selectedMatter.caseNo}</strong>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-[var(--border-color)]">
-                      <span className="text-[var(--text-muted)]">Filing Advocate:</span>
-                      <strong className="text-[var(--text-main)]">{selectedMatter.filedBy || 'Guyo Halake'}</strong>
-                    </div>
-                    <div className="flex justify-between py-1">
-                      <span className="text-[var(--text-muted)]">Case State:</span>
-                      <span className="font-bold text-emerald-600 font-mono">{selectedMatter.status}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Claim Value & Recovery */}
-                <div className="space-y-3">
-                  <h3 className="font-mono text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
-                    <DollarSign className="w-3.5 h-3.5 text-emerald-500" /> Financial Value
-                  </h3>
-                  <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] grid grid-cols-2 gap-3">
-                    <div>
-                      <span className="text-[10px] text-[var(--text-muted)] font-mono block uppercase">Claim Value</span>
-                      <strong className="text-base font-mono font-bold text-[var(--text-main)] block mt-0.5">
-                        KES {selectedMatter.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                      </strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-[var(--text-muted)] font-mono block uppercase">Billed to Date</span>
-                      <strong className="text-base font-mono font-bold text-emerald-600 block mt-0.5">
-                        KES {selectedFeeNotes.reduce((sum, fn) => sum + fn.grandTotal, 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column: Linked Bills of Costs, Taxations & Vault Pleadings */}
-              <div className="space-y-6">
-                {/* Linked Bills of Costs */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-mono text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-amber-500" /> Linked Bills of Costs & Fee Notes
-                    </h3>
-                    <span className="font-mono text-[10px] text-[var(--text-muted)]">
-                      {selectedFeeNotes.length} Generated
-                    </span>
-                  </div>
-
-                  {selectedFeeNotes.length === 0 ? (
-                    <div className="p-6 text-center border border-dashed border-[var(--border-color)] rounded-xl bg-[var(--bg-subtle)] space-y-2">
-                      <p className="text-xs text-[var(--text-muted)] font-mono">No bills drafted yet for this cause.</p>
-                      <button
-                        onClick={() => {
-                          handleDraftBOC(selectedMatter);
-                          setSelectedMatter(null);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 font-mono text-xs font-bold hover:bg-amber-500/20 cursor-pointer"
-                      >
-                        + Draft Bill of Costs Now
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {selectedFeeNotes.map(fn => (
-                        <div key={fn.id} className="p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] flex items-center justify-between">
-                          <div>
-                            <span className="font-mono font-bold text-xs text-[var(--text-main)] block">{fn.billNumber}</span>
-                            <span className="text-[10px] font-mono text-[var(--text-muted)]">
-                              Taxed / Issued on {fn.createdAt}
-                            </span>
-                          </div>
-                          <div className="text-right">
-                            <span className="font-mono font-bold text-xs text-[var(--text-main)] block">
-                              KES {fn.grandTotal.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                            </span>
-                            <button
-                              onClick={() => {
-                                if (onNavigateToBuilder) onNavigateToBuilder(fn, true);
-                                setSelectedMatter(null);
-                              }}
-                              className="text-[10px] text-amber-600 hover:underline font-mono font-bold"
-                            >
-                              Review PDF →
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Connected Pleadings & Documents */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-mono text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
-                      <FolderOpen className="w-3.5 h-3.5 text-purple-500" /> Connected Pleadings & Documents
-                    </h3>
-                    <span className="font-mono text-[10px] text-[var(--text-muted)]">
-                      {selectedDocuments.length} Documents
-                    </span>
-                  </div>
-
-                  {selectedDocuments.length === 0 ? (
-                    <div className="p-6 text-center border border-dashed border-[var(--border-color)] rounded-xl bg-[var(--bg-subtle)]">
-                      <p className="text-xs text-[var(--text-muted)] font-mono">No pleadings securely vaulted.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {selectedDocuments.map(doc => (
-                        <div key={doc.id} className="p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] flex items-center justify-between">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="p-1.5 rounded bg-purple-500/10 text-purple-600 shrink-0">
-                              <FileText className="w-3.5 h-3.5" />
-                            </div>
-                            <div className="min-w-0">
-                              <span className="font-bold text-xs text-[var(--text-main)] block truncate">{doc.filename}</span>
-                              <span className="text-[10px] font-mono text-[var(--text-muted)]">{doc.size}</span>
-                            </div>
-                          </div>
-                          <span className="px-2 py-0.5 rounded bg-slate-900 text-white dark:bg-zinc-800 text-[10px] font-mono font-bold shrink-0">
-                            VAULTED ✓
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* REGISTER NEW MATTER MODAL (Clean, Simple English, No Placeholders, Auto-connects Fee Note) */}
+      {/* NEW MATTER MODAL */}
       {showNewMatterModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl text-xs animate-in fade-in zoom-in-95">
+          <div className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl text-xs">
             <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
               <h3 className="font-bold text-sm text-[var(--text-main)]">
                 Register New Matter
               </h3>
-              <button onClick={() => setShowNewMatterModal(false)} className="text-[var(--text-muted)] hover:text-red-500 transition-colors cursor-pointer">
+              <button onClick={() => setShowNewMatterModal(false)} className="text-[var(--text-muted)] hover:text-red-500 cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1041,35 +943,32 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                   required
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="e.g. Seyani Brothers & Co. (K) Ltd v Greenhills Investment Ltd"
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Case Number</label>
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">CTS Case Number</label>
                   <input
                     type="text"
-                    value={newCaseNo}
-                    onChange={(e) => setNewCaseNo(e.target.value)}
+                    value={newCtsCaseNumber}
+                    onChange={(e) => setNewCtsCaseNumber(e.target.value)}
+                    placeholder="e.g. HCCC E104/2025"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono focus:outline-none focus:border-slate-400"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Court Forum</label>
-                  <select
-                    value={newForum}
-                    onChange={(e) => setNewForum(e.target.value)}
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Court Station &amp; Division</label>
+                  <input
+                    type="text"
+                    value={newCourtStation}
+                    onChange={(e) => setNewCourtStation(e.target.value)}
+                    placeholder="e.g. Milimani Commercial & Tax Division"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
-                  >
-                    <option value="High Court — Commercial">High Court — Commercial</option>
-                    <option value="Arbitration / High Court">Arbitration / High Court</option>
-                    <option value="Subordinate / Magistrate's Court">Subordinate / Magistrate's Court</option>
-                    <option value="Environment & Land Court (ELC)">Environment & Land Court (ELC)</option>
-                    <option value="Employment & Labour Relations Court (ELRC)">Employment & Labour (ELRC)</option>
-                    <option value="Non-Contentious Conveyancing">Non-Contentious Conveyancing</option>
-                  </select>
+                  />
                 </div>
               </div>
 
@@ -1078,20 +977,64 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                   <label className="block text-[var(--text-muted)] mb-1 font-semibold">Claimant / Client</label>
                   <input
                     type="text"
-                    required
                     value={newApplicant}
                     onChange={(e) => setNewApplicant(e.target.value)}
+                    placeholder="e.g. Seyani Brothers & Co. (K) Ltd"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Defendant</label>
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Defendant (Adverse Party)</label>
                   <input
                     type="text"
-                    required
                     value={newRespondent}
                     onChange={(e) => setNewRespondent(e.target.value)}
+                    placeholder="e.g. Greenhills Investment Ltd"
+                    className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
+                  />
+                </div>
+              </div>
+
+              {/* Conflict of Interest Warning */}
+              {respondentConflict && respondentConflict.hasConflict && (
+                <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs space-y-1 animate-in fade-in">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>Conflict of Interest Warning: {respondentConflict.conflictType?.replace(/_/g, ' ')}</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed font-sans">{respondentConflict.alertMessage}</p>
+                </div>
+              )}
+
+              {applicantConflict && applicantConflict.hasConflict && (
+                <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs space-y-1 animate-in fade-in">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>Conflict of Interest Warning: {applicantConflict.conflictType?.replace(/_/g, ' ')}</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed font-sans">{applicantConflict.alertMessage}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Hearing / Mention Date</label>
+                  <input
+                    type="datetime-local"
+                    value={newHearingDate}
+                    onChange={(e) => setNewHearingDate(e.target.value)}
+                    className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Lead Advocate</label>
+                  <input
+                    type="text"
+                    value={newLeadAdvocate}
+                    onChange={(e) => setNewLeadAdvocate(e.target.value)}
+                    placeholder="e.g. Karani Victor"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -1105,11 +1048,6 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                   onChange={(e) => setNewClaimAmount(parseFloat(e.target.value) || 0)}
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono focus:outline-none focus:border-slate-400"
                 />
-              </div>
-
-              <div className="p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] text-[11px] text-[var(--text-muted)] flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-slate-500 shrink-0" />
-                <span>A connected draft Fee Note will automatically be created and linked to this matter.</span>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--border-color)]">
@@ -1132,7 +1070,7 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
         </div>
       )}
 
-      {/* EDIT MATTER MODAL (Clean, Simple English) */}
+      {/* EDIT MATTER MODAL */}
       {editingMatter && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl text-xs animate-in fade-in zoom-in-95">
@@ -1159,29 +1097,46 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Case Number</label>
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">CTS Case Number</label>
                   <input
                     type="text"
-                    value={editingMatter.caseNo}
-                    onChange={(e) => setEditingMatter({ ...editingMatter, caseNo: e.target.value })}
+                    value={editingMatter.ctsCaseNumber || editingMatter.caseNo}
+                    onChange={(e) => setEditingMatter({ ...editingMatter, ctsCaseNumber: e.target.value, caseNo: e.target.value })}
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono focus:outline-none focus:border-slate-400"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Court Forum</label>
-                  <select
-                    value={editingMatter.forum}
-                    onChange={(e) => setEditingMatter({ ...editingMatter, forum: e.target.value })}
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Court Station</label>
+                  <input
+                    type="text"
+                    value={editingMatter.courtStation || editingMatter.forum}
+                    onChange={(e) => setEditingMatter({ ...editingMatter, courtStation: e.target.value, forum: e.target.value })}
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
-                  >
-                    <option value="High Court — Commercial">High Court — Commercial</option>
-                    <option value="Arbitration / High Court">Arbitration / High Court</option>
-                    <option value="Subordinate / Magistrate's Court">Subordinate / Magistrate's Court</option>
-                    <option value="Environment & Land Court (ELC)">Environment & Land Court (ELC)</option>
-                    <option value="Employment & Labour Relations Court (ELRC)">Employment & Labour (ELRC)</option>
-                    <option value="Non-Contentious Conveyancing">Non-Contentious Conveyancing</option>
-                  </select>
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Hearing / Mention Date</label>
+                  <input
+                    type="datetime-local"
+                    value={editingMatter.hearingDate || ''}
+                    onChange={(e) => setEditingMatter({ ...editingMatter, hearingDate: e.target.value })}
+                    className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[var(--text-muted)] mb-1 font-semibold">Assigned Advocate</label>
+                  <input
+                    type="text"
+                    value={editingMatter.leadAdvocate || ''}
+                    onChange={(e) => setEditingMatter({ ...editingMatter, leadAdvocate: e.target.value })}
+                    placeholder="e.g. Karani Victor"
+                    className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
+                  />
                 </div>
               </div>
 
@@ -1248,7 +1203,7 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-[var(--text-main)]">Share Matter File</h3>
-                  <p className="text-[10px] text-[var(--text-muted)]">Dispatch matter summary via email</p>
+                  <p className="text-[11px] text-[var(--text-muted)]">{emailShareMatter.ctsCaseNumber || emailShareMatter.caseNo}</p>
                 </div>
               </div>
               <button onClick={() => setEmailShareMatter(null)} className="text-[var(--text-muted)] hover:text-red-500 cursor-pointer">
@@ -1256,21 +1211,21 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
               </button>
             </div>
 
-            <form onSubmit={handleSendMatterEmail} className="space-y-3">
+            <form onSubmit={handleSendMatterEmail} className="space-y-3.5">
               <div>
-                <label className="block text-[var(--text-muted)] mb-1 font-semibold">Recipient Email</label>
+                <label className="block text-[var(--text-muted)] mb-1 font-semibold">Recipient Email Address</label>
                 <input
                   type="email"
                   required
                   value={emailRecipient}
                   onChange={(e) => setEmailRecipient(e.target.value)}
-                  placeholder="recipient@example.com"
-                  className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
+                  placeholder="e.g. advocate@kithinjilegal.co.ke"
+                  className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono focus:outline-none focus:border-slate-400"
                 />
               </div>
 
               <div>
-                <label className="block text-[var(--text-muted)] mb-1 font-semibold">Subject</label>
+                <label className="block text-[var(--text-muted)] mb-1 font-semibold">Subject Line</label>
                 <input
                   type="text"
                   required
@@ -1281,30 +1236,31 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
               </div>
 
               <div>
-                <label className="block text-[var(--text-muted)] mb-1 font-semibold">Message</label>
+                <label className="block text-[var(--text-muted)] mb-1 font-semibold">Message Body</label>
                 <textarea
-                  rows={8}
+                  rows={5}
+                  required
                   value={emailBody}
                   onChange={(e) => setEmailBody(e.target.value)}
-                  className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl p-3 text-[var(--text-main)] font-mono text-[11px] focus:outline-none focus:border-slate-400 resize-none"
+                  className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl p-3 text-[var(--text-main)] font-mono text-[11px] focus:outline-none focus:border-slate-400 leading-relaxed"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border-color)]">
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--border-color)]">
                 <button
                   type="button"
                   onClick={() => setEmailShareMatter(null)}
-                  className="px-4 py-2 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-subtle)] text-xs cursor-pointer"
+                  className="px-4 py-2 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)] text-xs cursor-pointer hover:bg-[var(--bg-subtle)]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSendingMatterEmail}
-                  className="px-4 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs hover:bg-black dark:hover:bg-slate-100 transition-colors"
+                  className="px-4 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{isSendingMatterEmail ? 'Sending...' : 'Send Email'}</span>
+                  <span>{isSendingMatterEmail ? 'Sending...' : 'Send File'}</span>
                 </button>
               </div>
             </form>
@@ -1314,5 +1270,3 @@ ${currentUser?.fullName || 'Karani Law Advocates'}`
     </div>
   );
 };
-
-export default MattersView;
