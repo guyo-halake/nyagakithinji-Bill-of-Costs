@@ -5,6 +5,8 @@ import { SystemUser } from '../../services/supabase';
 import { sendEmail } from '../../services/email';
 import { getSavedEmailTemplates, renderTemplateText } from '../../services/emailTemplates';
 import { hasPermission } from '../../services/rbac';
+import { checkConflictOfInterest } from '../../services/conflict';
+import { generateClientPortalToken } from '../../services/data';
 import {
   UserPlus,
   Search,
@@ -22,7 +24,11 @@ import {
   Receipt,
   Scale,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  ShieldCheck,
+  Copy,
+  Check,
+  ExternalLink
 } from 'lucide-react';
 
 interface ClientsViewProps {
@@ -65,6 +71,32 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
   const [isSending, setIsSending] = useState(false);
+
+  // Client Portal Magic Link Modal State
+  const [portalModalClient, setPortalModalClient] = useState<ExactClientRecord | null>(null);
+  const [portalLinkCopied, setPortalLinkCopied] = useState(false);
+  const [generatedMagicLink, setGeneratedMagicLink] = useState('');
+
+  const handleOpenPortalModal = (client: ExactClientRecord) => {
+    setActiveMenuId(null);
+    const { url } = generateClientPortalToken(client);
+    setGeneratedMagicLink(url);
+    setPortalLinkCopied(false);
+    setPortalModalClient(client);
+  };
+
+  const handleCopyMagicLink = () => {
+    if (!generatedMagicLink) return;
+    navigator.clipboard.writeText(generatedMagicLink);
+    setPortalLinkCopied(true);
+    setTimeout(() => setPortalLinkCopied(false), 3000);
+  };
+
+  const conflictCheck = React.useMemo(() => {
+    const query = newCompany.trim() || newName.trim();
+    if (!query || query.length < 3) return null;
+    return checkConflictOfInterest(query, { roleBeingAssigned: 'Client' });
+  }, [newName, newCompany]);
 
   const can = (code: string) => hasPermission(currentUser, code);
 
@@ -520,6 +552,14 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
 
                           {isMenuOpen && (
                             <div className="absolute right-0 mt-1 w-48 rounded-xl bg-white dark:bg-zinc-900 border border-[var(--border-color)] shadow-xl py-1 z-30 font-sans text-left">
+                              <button
+                                  type="button"
+                                  onClick={() => handleOpenPortalModal(client)}
+                                  className="w-full px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                                  <span>Portal Magic Link</span>
+                                </button>
                               {can('clients.email') && (
                                 <button
                                   type="button"
@@ -702,6 +742,15 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       <span>WhatsApp</span>
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPortalModal(selectedDossierClient)}
+                    className="px-3 py-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-500/20 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                    title="Generate Passwordless Client Portal Magic Link"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Client Portal</span>
+                  </button>
                 </div>
 
                 {can('boc.create') && (
@@ -717,6 +766,93 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     <span>Draft Bill of Costs</span>
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECURE CLIENT PORTAL MAGIC LINK MODAL */}
+      {portalModalClient && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl text-xs">
+            <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
+              <div>
+                <h3 className="font-brand font-bold text-sm text-[var(--text-main)] flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-indigo-500" />
+                  <span>Secure Client Portal Magic Link</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
+                  Passwordless client-facing access for {portalModalClient.name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPortalModalClient(null)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-100 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-2">
+              <div className="text-[11px] font-semibold text-slate-700 dark:text-zinc-300">
+                What your client will see in this read-only portal:
+              </div>
+              <ul className="text-[11px] text-slate-600 dark:text-zinc-400 space-y-1 list-disc list-inside">
+                <li>Real-time status of their active litigation and advisory matters</li>
+                <li>Instant download of approved Fee Notes and Bills of Costs with official receipts</li>
+                <li>Cleared client trust retainer balance widget (e.g. KES 1,450,000 cleared)</li>
+                <li>Direct matter vault upload dropzone for requested documents and evidence</li>
+              </ul>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-semibold text-slate-700 dark:text-zinc-300">
+                Production Magic Link (Valid for 30 days):
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={generatedMagicLink}
+                  className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-[11px] font-mono text-[var(--text-main)] select-all"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyMagicLink}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                    portalLinkCopied
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90'
+                  }`}
+                >
+                  {portalLinkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{portalLinkCopied ? 'Copied!' : 'Copy Link'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-[var(--border-color)]">
+              <span className="text-[10px] text-slate-400">
+                Production host: nyagahkithinji-advocates.azurewebsites.net
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.open(generatedMagicLink, '_blank')}
+                  className="px-3 py-1.5 rounded-xl border border-[var(--border-color)] hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Preview</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortalModalClient(null)}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold text-xs cursor-pointer"
+                >
+                  Done
+                </button>
               </div>
             </div>
           </div>
@@ -754,6 +890,27 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
                 />
               </div>
+
+              {conflictCheck && conflictCheck.hasConflict && (
+                <div className={`p-3 rounded-xl border text-xs space-y-1.5 animate-in fade-in ${
+                  conflictCheck.severity === 'CRITICAL'
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400'
+                }`}>
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>Conflict of Interest Warning ({conflictCheck.conflictType?.replace(/_/g, ' ')})</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed font-sans">{conflictCheck.alertMessage}</p>
+                  {conflictCheck.details && conflictCheck.details.length > 0 && (
+                    <div className="text-[10px] space-y-0.5 opacity-90 font-mono">
+                      {conflictCheck.details.map((d, i) => (
+                        <div key={i}>&bull; {d}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
