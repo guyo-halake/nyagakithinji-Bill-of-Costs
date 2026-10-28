@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getActiveFirmProfile } from '../../services/supabase';
 import { 
   ShieldCheck, Activity, CheckCircle2, XCircle, AlertCircle, 
   Users, DollarSign, Calendar, FileText, Check, MessageSquare, 
@@ -40,6 +41,7 @@ export const ManagingPartnerGodMode: React.FC<ManagingPartnerGodModeProps> = ({
   onNavigateToBuilder,
   onNavigateTab
 }) => {
+  const activeFirm = getActiveFirmProfile();
   // 1. Time Range State for Revenue Overview
   const [timeRange, setTimeRange] = useState<'month' | 'quarter' | 'ytd' | 'all'>('ytd');
 
@@ -98,7 +100,7 @@ export const ManagingPartnerGodMode: React.FC<ManagingPartnerGodModeProps> = ({
   return (
     <div className="space-y-8 w-full font-sans antialiased text-slate-900 dark:text-white">
       
-      {/* GOD MODE MASTER BANNER */}
+      {/* EXECUTIVE PARTNER OVERSIGHT BANNER */}
       <div className="p-6 rounded-2xl bg-slate-900 dark:bg-zinc-900 text-white shadow-xl border border-slate-800 relative overflow-hidden">
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
         
@@ -107,13 +109,13 @@ export const ManagingPartnerGodMode: React.FC<ManagingPartnerGodModeProps> = ({
             <div className="flex items-center gap-3">
               <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-mono font-extrabold text-xs tracking-wider border border-amber-500/30 flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-amber-400" />
-                GOD MODE CONTROL CENTER
+                EXECUTIVE OVERSIGHT DESK
               </span>
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" title="Real-time Synchronization Active"></span>
             </div>
             
             <h1 className="font-brand font-black text-2xl sm:text-3xl tracking-tight text-white mt-2">
-              Managing Partner Console — Adv. Nyagah Kithinji
+              {activeFirm.name} — Managing Partner Executive Suite
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl font-sans">
               Full enterprise oversight across all firm advocates, live billing activity, pending BOC approvals, granular permission toggles, and revenue metrics.
@@ -122,12 +124,12 @@ export const ManagingPartnerGodMode: React.FC<ManagingPartnerGodModeProps> = ({
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <button
-              onClick={() => onNavigateTab ? onNavigateTab('developer_page') : window.open('/developer-page', '_blank')}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-2 transition-all cursor-pointer shadow-md"
-              title="Open System Developer Page"
+              onClick={() => onNavigateTab ? onNavigateTab('settings') : null}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-sans font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-2 transition-all cursor-pointer shadow-md"
+              title="Firm Profile & Letterhead Settings"
             >
-              <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-              Developer Settings (/developers.azure)
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              Firm Profile & Letterhead
             </button>
             <button
               onClick={() => onNavigateTab ? onNavigateTab('boc') : onNavigateToBuilder && onNavigateToBuilder()}
