@@ -15,6 +15,7 @@ import { calculateLegalBill, BillCalculationResult } from '../../services/api';
 import { 
   EXACT_FIRM_INFO, 
   getActiveFirmProfile, 
+  FirmProfile, 
   EXACT_FEE_NOTES, 
   supabase, 
   ExactFeeNoteRecord, 
