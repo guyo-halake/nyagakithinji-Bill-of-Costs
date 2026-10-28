@@ -17,6 +17,7 @@ import { ProfileSettingsView } from './components/settings/ProfileSettingsView';
 import { TechSupportView } from './components/support/TechSupportView';
 import { LoginView } from './components/auth/LoginView';
 import { PasswordResetView } from './components/auth/PasswordResetView';
+import { ClientPortalView } from './components/portal/ClientPortalView';
 import { RecentsDraftsDrawer } from './components/layout/RecentsDraftsDrawer';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ManagingPartnerGodMode } from './components/admin/ManagingPartnerGodMode';
@@ -267,6 +268,35 @@ export const App: React.FC = () => {
     );
   }
 
+  // Check if corporate client is accessing passwordless client portal magic link
+  const clientPortalAccess = (() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const token = p.get('portal_token');
+      const clientId = p.get('client_id');
+      const isPortalPath = window.location.pathname.includes('client-portal') || p.get('view') === 'client-portal' || p.get('tab') === 'client-portal';
+      if (token || isPortalPath) {
+        return { clientId, token };
+      }
+    } catch (_) {}
+    return null;
+  })();
+
+  if (clientPortalAccess) {
+    return (
+      <ClientPortalView
+        clientId={clientPortalAccess.clientId}
+        token={clientPortalAccess.token}
+        onExitPortal={() => {
+          try {
+            window.history.pushState(null, '', '/');
+            window.location.href = window.location.origin;
+          } catch (_) {}
+        }}
+      />
+    );
+  }
+
   if (!currentUser) {
     return (
       <LoginView
@@ -470,6 +500,14 @@ export const App: React.FC = () => {
                 onNavigateHome={() => handleNavigateTab('home')}
               />
             )
+          )}
+
+          {/* CLIENT PORTAL (READ-ONLY) VIEW FOR SELECTED MATTER / CLIENT */}
+          {currentTab === 'client_portal' && (
+            <ClientPortalView
+              clientId={selectedPermissionUserId || 'c1'}
+              onExitPortal={() => handleNavigateTab('matters')}
+            />
           )}
 
           {/* DOCUMENT AUTHENTICITY VERIFICATION VIEW */}
