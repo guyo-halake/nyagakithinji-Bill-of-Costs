@@ -78,7 +78,20 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
   onNavigateToTab,
   currentUser,
 }) => {
-  const activeFirm = getActiveFirmProfile();
+  const [activeFirm, setActiveFirm] = useState<FirmProfile>(() => getActiveFirmProfile());
+
+  useEffect(() => {
+    const handleFirmChange = () => {
+      const updated = getActiveFirmProfile();
+      setActiveFirm(updated);
+      setBankDetailsText(updated.bankDetails || `${updated.bankName || 'KCB Bank Kenya Ltd'} | ${updated.bankBranch || 'Kilimani Branch'} | A/C No: ${updated.bankAccount || '1104889922'} | Swift: ${updated.swiftCode || 'KCBLKENX'}`);
+      if (updated.stampUrl) {
+        setStampImageUrl(updated.stampUrl);
+      }
+    };
+    window.addEventListener('firmSettingsChanged', handleFirmChange);
+    return () => window.removeEventListener('firmSettingsChanged', handleFirmChange);
+  }, []);
   // Stepper Stage State (1: Parties/Client, 2: Tariff & Scale, 3: Folios & Disbursements, 4: Endorsement/Remittance)
   const [activeStep, setActiveStep] = useState<number>(() => isPreview ? 4 : 1);
 
@@ -425,7 +438,7 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
           totalAmount: result?.grand_total || 0,
           dateBilled,
           signatoryName: activeFirm.name,
-          lskNumber: 'ADMIN/2026/001'
+          lskNumber: activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'
         });
         if (isMounted) setSecurityRecord(sec);
       } catch (err) {
@@ -914,7 +927,7 @@ NAIROBI, KENYA
     doc.text('ADVOCATES & COMMISSIONERS FOR OATHS', headerTextX, 17.5);
 
     doc.setFontSize(6.5);
-    doc.text(`LSK Reg: ADMIN/2026/001 | KRA PIN: ${activeFirm.kraPin || 'P051123456Z'}`, headerTextX, 21);
+    doc.text(`LSK Reg: ${activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'} | KRA PIN: ${activeFirm.kraPin || 'P051123456Z'}`, headerTextX, 21);
 
     // Right-aligned Firm Contact & Ref
     doc.setFont('helvetica', 'normal');
@@ -1139,7 +1152,7 @@ NAIROBI, KENYA
       doc.setFontSize(6.5);
       doc.text('ADVOCATES & COMMISSIONERS FOR OATHS', sigCenter, lineY + 7.2, { align: 'center' });
       doc.setFontSize(6);
-      doc.text('LSK Practicing Roll: ADMIN/2026/001', sigCenter, lineY + 10.4, { align: 'center' });
+      doc.text(`LSK Practicing Roll: ${activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'}`, sigCenter, lineY + 10.4, { align: 'center' });
 
       // Confirmation QR code right under the words!
       if (securityRecord?.qrCodeDataUrl) {
@@ -1391,7 +1404,7 @@ NAIROBI, KENYA
       doc.text(partyRole, sigCenter, lineY + 7.2, { align: 'center' });
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(6);
-      doc.text('LSK Practicing Roll: ADMIN/2026/001', sigCenter, lineY + 10.4, { align: 'center' });
+      doc.text(`LSK Practicing Roll: ${activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'}`, sigCenter, lineY + 10.4, { align: 'center' });
 
       // Confirmation QR code right under the words!
       if (securityRecord?.qrCodeDataUrl) {
@@ -2813,7 +2826,7 @@ NAIROBI, KENYA
                 <div>
                   <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] block">Law Firm:</span>
                   <p className="font-semibold text-[var(--text-main)]">{activeFirm.name}</p>
-                  <p className="text-[var(--text-muted)] text-[11px]">{activeFirm.address} &bull; LSK Roll: ADMIN/2026/001</p>
+                  <p className="text-[var(--text-muted)] text-[11px]">{activeFirm.address} &bull; LSK Roll: {activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'}</p>
                 </div>
               </div>
 
@@ -2960,7 +2973,7 @@ NAIROBI, KENYA
                         ADVOCATES OF THE HIGH COURT OF KENYA
                       </span>
                       <span className="text-[8px] text-gray-500 font-mono block">
-                        LSK Reg: ADMIN/2026/001 &bull; KRA PIN: {activeFirm.kraPin || 'P051123456Z'}
+                        LSK Reg: ${activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'} &bull; KRA PIN: {activeFirm.kraPin || 'P051123456Z'}
                       </span>
                     </div>
                   </div>
@@ -3151,7 +3164,7 @@ NAIROBI, KENYA
                           <p className="font-bold uppercase text-[9px] text-gray-700">
                             ADVOCATES &amp; COMMISSIONERS FOR OATHS
                           </p>
-                          <p className="text-[8px] text-gray-600 font-mono">LSK Practicing Roll: ADMIN/2026/001</p>
+                          <p className="text-[8px] text-gray-600 font-mono">LSK Practicing Roll: ${activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'}</p>
 
                           {/* Scannable Confirmation QR Code right under the words */}
                           {securityRecord?.qrCodeDataUrl && (
@@ -3393,7 +3406,7 @@ NAIROBI, KENYA
                           <p className="font-bold uppercase text-[9px] text-gray-700">
                             {docType === 'advocate_client' ? 'ADVOCATES FOR THE APPLICANT' : `ADVOCATES FOR THE ${isDefendant ? 'RESPONDENT' : 'CLAIMANT'}`}
                           </p>
-                          <p className="text-[8px] text-gray-600 font-mono">LSK Practicing Roll: ADMIN/2026/001</p>
+                          <p className="text-[8px] text-gray-600 font-mono">LSK Practicing Roll: ${activeFirm.lskRegNo || activeFirm.firmRegNo || 'ADMIN/2026/001'}</p>
 
                           {/* Scannable Confirmation QR Code right under the words */}
                           {securityRecord?.qrCodeDataUrl && (
