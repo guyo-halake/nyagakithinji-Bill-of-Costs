@@ -172,6 +172,127 @@ export const EXACT_FIRM_INFO = {
   }
 };
 
+
+export interface FirmProfile {
+  id?: string;
+  name: string;
+  title: string;
+  firmRegNo: string;
+  managingPartner: string;
+  managingPartnerLsk?: string;
+  managingPartnerEmail?: string;
+  managingPartnerPhone?: string;
+  address: string;
+  fullLocation?: string;
+  poBox: string;
+  email: string;
+  serviceEmail?: string;
+  taxationEmail?: string;
+  billingEmail?: string;
+  phone: string;
+  kraPin: string;
+  vatNumber?: string;
+  bankDetails: string;
+  officeBankName?: string;
+  officeBranch?: string;
+  officeAccountNo?: string;
+  officeSwift?: string;
+  clientTrustBankName?: string;
+  clientTrustBranch?: string;
+  clientTrustAccountNo?: string;
+  clientTrustSwift?: string;
+  mpesaPaybill?: string;
+  mpesaAccountRef?: string;
+  website?: string;
+  logoUrl?: string;
+  stampUrl?: string;
+  bankName?: string;
+  bankAccount?: string;
+  bankBranch?: string;
+  swiftCode?: string;
+}
+
+/**
+ * Returns dynamic, active firm profile details.
+ * Prioritizes user's custom settings (configured via Settings -> Firm Profile)
+ * and falls back gracefully to defaults.
+ */
+export const getActiveFirmProfile = (): FirmProfile => {
+  try {
+    const saved = localStorage.getItem('BILLSZIP_FIRM_SETTINGS');
+    const stampUrl = localStorage.getItem('karani_firm_stamp_url') || '/stamp.png';
+    if (saved) {
+      const p = JSON.parse(saved);
+      const name = p.topbarTitle || p.name || EXACT_FIRM_INFO.name;
+      const bankName = p.officeBankName || p.bankName || 'KCB Bank Kenya Ltd';
+      const bankBranch = p.officeBranch || p.bankBranch || 'Kilimani Branch';
+      const bankAccount = p.officeAccountNo || p.bankAccount || '1104889922';
+      const swiftCode = p.officeSwift || p.swiftCode || 'KCBLKENX';
+      const officeBank = `${bankName} | ${bankBranch} | A/C: ${bankAccount} | Swift: ${swiftCode}`;
+
+      return {
+        id: p.id || name,
+        name,
+        title: p.topbarSubtitle || p.title || (EXACT_FIRM_INFO as any).title || 'Advocates of the High Court of Kenya',
+        firmRegNo: p.lskRegNo || p.firmRegNo || (EXACT_FIRM_INFO as any).firmRegNo || 'P.105/1992',
+        managingPartner: p.managingPartner || (EXACT_FIRM_INFO as any).managingPartner || 'Managing Partner',
+        managingPartnerLsk: p.lskRegNo || p.managingPartnerLsk || (EXACT_FIRM_INFO as any).managingPartnerLsk || 'P.105/1992',
+        managingPartnerEmail: p.email || EXACT_FIRM_INFO.email,
+        managingPartnerPhone: p.phone || EXACT_FIRM_INFO.phone,
+        address: p.address || EXACT_FIRM_INFO.address,
+        fullLocation: p.fullLocation || p.address || EXACT_FIRM_INFO.fullLocation,
+        poBox: p.poBox || EXACT_FIRM_INFO.poBox,
+        email: p.email || EXACT_FIRM_INFO.email,
+        serviceEmail: p.serviceEmail || p.email || (EXACT_FIRM_INFO as any).serviceEmail || 'service@nbkco-advocates.com',
+        taxationEmail: p.taxationEmail || p.email || EXACT_FIRM_INFO.taxationEmail,
+        billingEmail: p.billingEmail || p.email || EXACT_FIRM_INFO.billingEmail,
+        phone: p.phone || EXACT_FIRM_INFO.phone,
+        kraPin: p.kraPin || EXACT_FIRM_INFO.kraPin,
+        vatNumber: p.vatNumber || (EXACT_FIRM_INFO as any).vatNumber || 'VAT-0192834-K',
+        bankDetails: p.bankDetails || officeBank,
+        officeBankName: bankName,
+        officeBranch: bankBranch,
+        officeAccountNo: bankAccount,
+        officeSwift: swiftCode,
+        clientTrustBankName: p.clientTrustBankName || 'Standard Chartered Bank',
+        clientTrustBranch: p.clientTrustBranch || 'Kenyatta Avenue',
+        clientTrustAccountNo: p.clientTrustAccountNo || '010203040506',
+        clientTrustSwift: p.clientTrustSwift || 'SCBLKENX',
+        mpesaPaybill: p.mpesaPaybill || '522522',
+        mpesaAccountRef: p.mpesaAccountRef || 'LEGAL-FEES',
+        website: p.website || EXACT_FIRM_INFO.website,
+        logoUrl: p.logoUrl || EXACT_FIRM_INFO.logoUrl || '/logo.png',
+        stampUrl: p.stampUrl || stampUrl,
+        bankName,
+        bankAccount,
+        bankBranch,
+        swiftCode,
+      };
+    }
+  } catch (e) {}
+
+  const defaultStamp = typeof localStorage !== 'undefined' ? localStorage.getItem('karani_firm_stamp_url') || '/stamp.png' : '/stamp.png';
+  return {
+    ...(EXACT_FIRM_INFO as any),
+    title: (EXACT_FIRM_INFO as any).title || 'Advocates of the High Court of Kenya',
+    bankName: 'KCB Bank Kenya Ltd',
+    bankBranch: 'Kilimani Branch',
+    bankAccount: '1104889922',
+    swiftCode: 'KCBLKENX',
+    officeBankName: 'KCB Bank Kenya Ltd',
+    officeBranch: 'Kilimani Branch',
+    officeAccountNo: '1104889922',
+    officeSwift: 'KCBLKENX',
+    clientTrustBankName: 'Standard Chartered Bank',
+    clientTrustBranch: 'Kenyatta Avenue',
+    clientTrustAccountNo: '010203040506',
+    clientTrustSwift: 'SCBLKENX',
+    mpesaPaybill: '522522',
+    mpesaAccountRef: 'LEGAL-FEES',
+    stampUrl: defaultStamp,
+  };
+};
+
 export const EXACT_LOGGED_IN_USER = SEEDED_USERS[0];
 
 // 1. CLIENTS DATABASE SCHEMA & INTERFACE
@@ -281,6 +402,23 @@ export const EXACT_CLIENTS: ExactClientRecord[] = [
     contactPerson: "Sunil Shah",
     activeMattersCount: 1,
     totalBilledAmount: 0.00
+  },
+  {
+    id: "c-safari",
+    name: "Safaricom PLC",
+    company: "Safaricom Telecommunications PLC",
+    category: "Corporate or Institutional",
+    email: "legal@safaricom.co.ke",
+    phone: "+254 722 000 000",
+    phonePrimary: "+254 722 000 000",
+    phoneSecondary: "+254 20 427 3000",
+    matters: 1,
+    mattersList: ["Safaricom PLC v Telepost (HCCC E4395/2026)"],
+    code: "CLI-SAFARI-4027",
+    kraPin: "P051000000X",
+    contactPerson: "Head of Legal and Regulatory Affairs",
+    activeMattersCount: 1,
+    totalBilledAmount: 40600.00
   }
 ];
 
@@ -304,6 +442,12 @@ export interface ExactMatterRecord {
   nextHearingDate?: string;
   matterNumber?: string;
   leadAdvocate?: string;
+  // Kenya Judiciary E-Filing & Cause List Tracker fields:
+  ctsCaseNumber?: string;
+  courtStation?: string;
+  hearingDate?: string; // ISO datetime string (e.g. "2026-10-29T09:30")
+  courtActionRequired?: string; // e.g. "File Submissions by Friday", "Ruling Delivery"
+  leadAdvocateEmail?: string;
 }
 
 export const EXACT_MATTERS: ExactMatterRecord[] = [
@@ -318,14 +462,19 @@ export const EXACT_MATTERS: ExactMatterRecord[] = [
     status: "Taxation Ready",
     statusClass: "ready",
     caseNo: "HCCC E104/2025",
+    ctsCaseNumber: "E104/2025",
+    courtStation: "Milimani Commercial & Tax Division",
+    hearingDate: "2026-10-29T09:30",
+    courtActionRequired: "Mention to confirm filing of Written Submissions on Party & Party Costs",
     filedBy: "Nyagah B. Kithinji & Co. Advocates — for the Claimant",
     amount: 30820193.28,
     itemsCount: 250,
     feeNoteLink: "BOC-2026-SEYANI-001",
     documentLink: "26.02.2026 - BILL OF COSTS - Seyani v Green Hills (1).xlsx",
-    nextHearingDate: "Today @ 09:30 AM",
+    nextHearingDate: "Tomorrow @ 09:30 AM",
     matterNumber: "HCCC E104/2025",
-    leadAdvocate: "Karani Victor"
+    leadAdvocate: "Karani Victor",
+    leadAdvocateEmail: "vickarani@gmail.com"
   },
   {
     id: "dhanya",
@@ -338,14 +487,19 @@ export const EXACT_MATTERS: ExactMatterRecord[] = [
     status: "Taxation Ready",
     statusClass: "ready",
     caseNo: "Arb. Cause No. 12 of 2025",
+    ctsCaseNumber: "ARB/12/2025",
+    courtStation: "Chartered Institute of Arbitrators (CIArb) — Nairobi Centre",
+    hearingDate: "2026-10-30T11:00",
+    courtActionRequired: "Directions on Claimant's Supplementary Witness Statement & Hearing Dates",
     filedBy: "Nyagah B. Kithinji & Co. Advocates — for the Claimant",
     amount: 3986663.93,
     itemsCount: 226,
     feeNoteLink: "BOC-2026-DHANYA-003",
     documentLink: "14.01.2026 - Bill of Costs - Dhanya v Sunil.xlsx",
-    nextHearingDate: "Tomorrow @ 11:00 AM",
+    nextHearingDate: "In 2 days @ 11:00 AM",
     matterNumber: "Arb. Cause 12/2025",
-    leadAdvocate: "Guyo Halake"
+    leadAdvocate: "Guyo Halake",
+    leadAdvocateEmail: "guyohalakeofficial@gmail.com"
   },
   {
     id: "hccomm",
@@ -358,15 +512,46 @@ export const EXACT_MATTERS: ExactMatterRecord[] = [
     status: "Commercial Court",
     statusClass: "court",
     caseNo: "HCCOMM E547 of 2024",
+    ctsCaseNumber: "HCCOMM/E547/2024",
+    courtStation: "High Court Commercial & Admiralty Division — Milimani",
+    hearingDate: "2026-11-04T14:15",
+    courtActionRequired: "Ruling Delivery on Defendants' Application to Strike Out Suit",
     filedBy: "Nyagah B. Kithinji & Co. Advocates — for Defendants",
     amount: 405594.00,
     itemsCount: 19,
     feeNoteLink: "BOC-2026-ZHENJIAN-002",
     documentLink: "HCCOMM E547 of 2024 - Main Suit - 88's Party and Party Bill of Costs.xlsx",
-    nextHearingDate: "06 Oct 2026 @ 02:15 PM",
+    nextHearingDate: "04 Nov 2026 @ 02:15 PM",
     matterNumber: "HCCOMM E547/2024",
-    leadAdvocate: "Nyagah Kithinji"
+    leadAdvocate: "Nyagah Kithinji",
+    leadAdvocateEmail: "advocate@kithinjilegal.co.ke"
+  },
+  {
+    id: "m-safari",
+    title: "Safaricom PLC v Telepost Pension Scheme",
+    applicant: "Safaricom PLC",
+    applicantRole: "Plaintiff",
+    respondent: "Telepost Pension Scheme Trustees",
+    respondentRole: "Defendants",
+    forum: "High Court Commercial Division",
+    status: "Taxation Ready",
+    statusClass: "ready",
+    caseNo: "HCCC E4395/2026",
+    ctsCaseNumber: "HCCC E4395/2026",
+    courtStation: "Milimani Commercial and Tax Division",
+    hearingDate: "2026-11-06T09:00",
+    courtActionRequired: "Submission on Party & Party Costs",
+    filedBy: "Nyagah B. Kithinji & Co. Advocates - for the Plaintiff",
+    amount: 670000.00,
+    itemsCount: 15,
+    feeNoteLink: "BOC-2026-SAFARI-001",
+    documentLink: "HCCC_E4395_2026_Party_Costs_Bill.xlsx",
+    nextHearingDate: "Directions Pending",
+    matterNumber: "HCCC E4395/2026",
+    leadAdvocate: "Nyagah Kithinji",
+    leadAdvocateEmail: "advocate@kithinjilegal.co.ke"
   }
+
 ];
 
 // 3. FEE NOTES DATABASE SCHEMA & INTERFACE (Processed & Drafts)
@@ -490,6 +675,24 @@ const INITIAL_FEE_NOTES: ExactFeeNoteRecord[] = [
     createdAt: "2026-03-19 09:10 AM",
     pdfUrl: "",
     excelUrl: ""
+  },
+  {
+    id: "fn-safari-001",
+    billNumber: "BOC-2026-SAFARI-001",
+    matterId: "m-safari",
+    matterTitle: "Safaricom PLC v Telepost Pension Scheme",
+    clientName: "Safaricom PLC",
+    courtSchedule: "Schedule 6 - High Court Commercial",
+    claimValue: 670000.00,
+    instructionFee: 35000.00,
+    gettingUpFee: 0.00,
+    grandTotal: 40600.00,
+    status: "processed",
+    generatedByUser: "Nyagah Kithinji (Managing Partner)",
+    generatedByUserId: "usr-advocate-002",
+    createdAt: "2026-03-20 10:00 AM",
+    pdfUrl: "/vault/HCCC_E4395_2026_Party_Costs_Bill.pdf",
+    excelUrl: ""
   }
 ];
 
@@ -533,6 +736,35 @@ export const saveFeeNotes = () => {
 };
 
 export const saveFeeNoteToDatabase = async (note: ExactFeeNoteRecord): Promise<{ success: boolean; note: ExactFeeNoteRecord }> => {
+  // 1. Direct Supabase Postgres Upsert (Primary authoritative cloud store)
+  try {
+    const isUuid = (val?: string | null) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+    const payload: any = {
+      bill_number: note.billNumber,
+      bill_type: (note as any).documentType === 'fee_note' ? 'fee_note' : 'bill_of_costs',
+      court_schedule: note.courtSchedule || null,
+      claim_value: Number(note.claimValue || 0),
+      instruction_fee: Number(note.instructionFee || 0),
+      getting_up_fee: Number(note.gettingUpFee || 0),
+      grand_total: Number(note.grandTotal || 0),
+      status: note.status || 'processed',
+      generated_by_user: note.generatedByUser || 'Advocate',
+      pdf_url: note.pdfUrl || null,
+      excel_url: note.excelUrl || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (isUuid(note.id)) {
+      payload.id = note.id;
+    }
+    const { data, error } = await supabase.from('fee_notes').upsert(payload, { onConflict: 'bill_number' }).select();
+    if (!error && data && data[0]) {
+      note = { ...note, id: data[0].id || note.id };
+    }
+  } catch (supaErr) {
+    console.warn('Supabase direct upsert error:', supaErr);
+  }
+
+  // 2. Also notify backend API endpoint
   try {
     const res = await fetch('/api/v1/feenotes', {
       method: 'POST',
@@ -541,15 +773,11 @@ export const saveFeeNoteToDatabase = async (note: ExactFeeNoteRecord): Promise<{
     });
     if (res.ok) {
       const data = await res.json();
-      const savedNote = data.note || note;
-      const current = getFeeNotes();
-      const updated = [savedNote, ...current.filter(n => n.billNumber !== savedNote.billNumber && n.id !== savedNote.id)];
-      persistFeeNotes(updated);
-      return { success: true, note: savedNote };
+      if (data.note) note = data.note;
     }
-  } catch (e) {
-    console.warn('Backend saveFeeNoteToDatabase error:', e);
-  }
+  } catch (e) {}
+
+  // 3. Keep local cache updated
   const current = getFeeNotes();
   const updated = [note, ...current.filter(n => n.billNumber !== note.billNumber && n.id !== note.id)];
   persistFeeNotes(updated);
@@ -564,6 +792,26 @@ export const deleteFeeNoteFromDatabase = async (noteId: string): Promise<boolean
   const updated = current.filter(n => n.id !== noteId && n.billNumber !== noteId);
   persistFeeNotes(updated);
   return true;
+};
+
+export const uploadPdfToVault = async (docRef: string, pdfBlob: Blob): Promise<string> => {
+  const filePath = `fee-notes/${docRef}.pdf`;
+  try {
+    const { data, error } = await supabase.storage.from('documents').upload(filePath, pdfBlob, {
+      contentType: 'application/pdf',
+      upsert: true,
+    });
+    if (!error && data) {
+      const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(filePath);
+      if (publicUrlData?.publicUrl) {
+        return publicUrlData.publicUrl;
+      }
+    }
+  } catch (e) {
+    console.warn('Supabase storage upload notice:', e);
+  }
+  const origin = typeof window !== 'undefined' && window.location ? window.location.origin : '';
+  return `${origin}/?tab=verify&ref=${encodeURIComponent(docRef)}`;
 };
 
 // -------------------------------------------------------------
@@ -620,22 +868,8 @@ export const persistMatters = (matters: ExactMatterRecord[], skipRealtimeEvent =
 };
 
 export const fetchFeeNotesFromDatabase = async (firmId?: string): Promise<ExactFeeNoteRecord[]> => {
+  // 1. Primary: Authoritative Supabase PostgreSQL cloud database
   try {
-    // 1. Primary: Authoritative server database (/api/v1/feenotes)
-    const res = await fetch('/api/v1/feenotes');
-    if (res.ok) {
-      const remoteNotes: ExactFeeNoteRecord[] = await res.json();
-      if (Array.isArray(remoteNotes) && remoteNotes.length > 0) {
-        persistFeeNotes(remoteNotes, true);
-        return remoteNotes;
-      }
-    }
-  } catch (e) {
-    console.warn('Primary database /api/v1/feenotes unavailable, trying Supabase fallback:', e);
-  }
-
-  try {
-    // 2. Secondary: Supabase cloud backup
     let query = supabase.from('fee_notes').select('*').order('created_at', { ascending: false });
     const isUuid = firmId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(firmId);
     if (isUuid) {
@@ -678,8 +912,20 @@ export const fetchFeeNotesFromDatabase = async (firmId?: string): Promise<ExactF
       return combined;
     }
   } catch (e) {
-    console.warn('fetchFeeNotesFromDatabase remote error, using local ledger:', e);
+    console.warn('fetchFeeNotesFromDatabase remote error, trying API fallback:', e);
   }
+
+  // 2. Secondary fallback: Backend API (/api/v1/feenotes)
+  try {
+    const res = await fetch('/api/v1/feenotes');
+    if (res.ok) {
+      const remoteNotes: ExactFeeNoteRecord[] = await res.json();
+      if (Array.isArray(remoteNotes) && remoteNotes.length > 0) {
+        persistFeeNotes(remoteNotes, true);
+        return remoteNotes;
+      }
+    }
+  } catch (apiErr) {}
 
   return getFeeNotes();
 };
@@ -803,12 +1049,24 @@ export const EXACT_RECENTS_LOGS: ExactRecentActivityRecord[] = [
 export interface ExactVaultFileRecord {
   id: string;
   filename: string;
+  fileName?: string;
+  name?: string;
   path: string;
   matter: string;
+  matterId?: string;
+  matterTitle?: string;
   client: string;
   fileType: string;
   size: string;
+  fileSize?: string;
   updatedAt: string;
+  uploadedAt?: string;
+  uploadedBy?: string;
+  category?: string;
+  version?: string;
+  status?: string;
+  isClientVisible?: boolean;
+  downloadUrl?: string;
   extractedMetrics: {
     claimValue: number;
     instructionFee: number;
