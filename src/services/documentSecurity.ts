@@ -1,5 +1,5 @@
 import QRCode from 'qrcode';
-import { EXACT_FIRM_INFO } from './supabase';
+import { EXACT_FIRM_INFO, getActiveFirmProfile } from './supabase';
 
 export interface DocumentSecurityData {
   documentRef: string;
@@ -124,7 +124,8 @@ export const computeDocumentFingerprint = (data: {
   const normDate = (data.dateBilled || '').trim();
 
   // Canonical payload
-  const rawPayload = `${FIRM_ROOT_SECRET}|${normRef}|${normClient}|${normAmount}|${normDate}|${EXACT_FIRM_INFO.kraPin}`;
+  const firm = getActiveFirmProfile();
+  const rawPayload = `${FIRM_ROOT_SECRET}|${normRef}|${normClient}|${normAmount}|${normDate}|${firm.kraPin || EXACT_FIRM_INFO.kraPin}`;
   const fullHash = sha256Pure(rawPayload);
 
   // Short 8-character human-readable verification token: e.g. "8F92-C4B1"
@@ -179,7 +180,7 @@ export const generateDocumentSecurityPayload = async (
     matterTitle: data.matterTitle || 'Legal Matter',
     totalAmount: data.totalAmount,
     dateBilled: data.dateBilled,
-    signatoryName: data.signatoryName || EXACT_FIRM_INFO.name,
+    signatoryName: data.signatoryName || getActiveFirmProfile().name,
     lskNumber: data.lskNumber || 'ADMIN/2026/001',
     shortToken,
     fullHash,
