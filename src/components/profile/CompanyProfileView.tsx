@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase, SystemUser } from '../../services/supabase';
+import { supabase, SystemUser, getActiveFirmProfile } from '../../services/supabase';
 import {
   Building2,
   MapPin,
@@ -15,7 +15,43 @@ import {
 interface CompanyProfileViewProps { currentUser?: SystemUser | null; }
 
 export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({ currentUser }) => {
-  const [firmProfile, setFirmProfile] = useState({ name: '', fullLocation: '', firmRegNo: '', kraPin: '', address: '', poBox: '', website: '', email: '', taxationEmail: '', billingEmail: '', phone: '', logoUrl: '' });
+  const initialFirm = getActiveFirmProfile();
+  const [firmProfile, setFirmProfile] = useState({
+    name: initialFirm.name || '',
+    fullLocation: initialFirm.fullLocation || initialFirm.address || '',
+    firmRegNo: initialFirm.lskRegNo || initialFirm.firmRegNo || '',
+    kraPin: initialFirm.kraPin || '',
+    address: initialFirm.address || '',
+    poBox: initialFirm.poBox || '',
+    website: initialFirm.website || '',
+    email: initialFirm.email || '',
+    taxationEmail: initialFirm.taxationEmail || initialFirm.email || '',
+    billingEmail: initialFirm.billingEmail || initialFirm.email || '',
+    phone: initialFirm.phone || '',
+    logoUrl: initialFirm.logoUrl || '/logo.png'
+  });
+
+  useEffect(() => {
+    const handleFirmChange = () => {
+      const updated = getActiveFirmProfile();
+      setFirmProfile({
+        name: updated.name || '',
+        fullLocation: updated.fullLocation || updated.address || '',
+        firmRegNo: updated.lskRegNo || updated.firmRegNo || '',
+        kraPin: updated.kraPin || '',
+        address: updated.address || '',
+        poBox: updated.poBox || '',
+        website: updated.website || '',
+        email: updated.email || '',
+        taxationEmail: updated.taxationEmail || updated.email || '',
+        billingEmail: updated.billingEmail || updated.email || '',
+        phone: updated.phone || '',
+        logoUrl: updated.logoUrl || '/logo.png'
+      });
+    };
+    window.addEventListener('firmSettingsChanged', handleFirmChange);
+    return () => window.removeEventListener('firmSettingsChanged', handleFirmChange);
+  }, []);
   // Legal Calculations & Work Settings (Moved to Company Profile per specifications)
   const [defaultSchedule, setDefaultSchedule] = useState('schedule_6_high_court');
   const [defaultCurrency, setDefaultCurrency] = useState('KSHS');
@@ -54,7 +90,7 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({ currentU
       {/* TOP CENTER LOGO & HEADER */}
       <div className="text-center space-y-3 pt-4 pb-2 border-b border-[var(--border-color)]/50">
         <img
-          src="/logo.png"
+          src={firmProfile.logoUrl || "/logo.png"}
           alt="Nyagah B. Kithinji & Co. Advocates Logo"
           className="h-20 w-auto object-contain mx-auto"
         />
