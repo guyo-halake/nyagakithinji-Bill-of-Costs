@@ -2,24 +2,27 @@ import React, { useState, useEffect } from 'react';
 import { 
   Scale, Plus, Trash2, Printer, FileText, X, Check, 
   MessageCircle, Mail, Save, Download, Share2, Send, 
-  ChevronRight, ChevronLeft, CheckCircle2, AlertCircle, 
+  ChevronRight, ChevronLeft, ChevronDown, CheckCircle2, AlertCircle, 
   ArrowRight, ArrowLeft, Sparkles, Edit3, Eye, Calendar,
   Building, User, FileCheck, DollarSign, Receipt, Briefcase, Landmark,
   Stamp, PenTool, FileSpreadsheet, Upload, RotateCcw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { fetchMatters, fetchClients, syncMatterAndClientFromFeeNote } from '../../services/data';
+import { sendEmail } from '../../services/email';
 import { ExactMatterRecord, ExactClientRecord, getClients, getMatters } from '../../services/supabase';
 import { calculateLegalBill, BillCalculationResult } from '../../services/api';
 import { 
   EXACT_FIRM_INFO, 
+  getActiveFirmProfile, 
   EXACT_FEE_NOTES, 
   supabase, 
   ExactFeeNoteRecord, 
   SystemUser, 
   persistFeeNotes, 
   getFeeNotes,
-  saveFeeNoteToDatabase
+  saveFeeNoteToDatabase,
+  uploadPdfToVault
 } from '../../services/supabase';
 import { hasPermission } from '../../services/rbac';
 import { jsPDF } from 'jspdf';
@@ -27,20 +30,20 @@ import autoTable from 'jspdf-autotable';
 import { generateDocumentSecurityPayload, DocumentSecurityRecord } from '../../services/documentSecurity';
 
 const STATUTORY_SCHEDULES = [
-  { id: 'schedule_6_high_court', label: 'Schedule 6 - Costs of Proceedings in the High Court (L.N. 35/2014)', category: 'Litigation' },
-  { id: 'schedule_7_magistrate', label: 'Schedule 7 - Costs of Proceedings in Subordinate Courts (L.N. 45/2014)', category: 'Litigation' },
-  { id: 'schedule_1_conveyancing', label: 'Schedule 1 - Conveyancing: Sales, Purchases, Mortgages & Charges', category: 'Conveyancing' },
-  { id: 'schedule_2_leases', label: 'Schedule 2 - Leases & Tenancy Agreements at a Rack Rent', category: 'Leases' },
-  { id: 'schedule_3_companies', label: 'Schedule 3 - Formation, Incorporation & Registration of Companies', category: 'Commercial' },
-  { id: 'schedule_4_ip', label: 'Schedule 4 - Trade Marks (L.N. 35/2014)', category: 'Intellectual Property' },
-  { id: 'schedule_5_chattels', label: 'Schedule 5 - Fees Not Otherwise Prescribed & Chattels Transfer', category: 'General & Securities' },
-  { id: 'schedule_8_bprt', label: 'Schedule 8 - Landlord & Tenant Tribunal (Cap. 301 - BPRT)', category: 'Tribunals' },
-  { id: 'schedule_9_rrt', label: 'Schedule 9 - Rent Restriction Tribunal (Cap. 296 - RRT)', category: 'Tribunals' },
-  { id: 'schedule_10_probate', label: 'Schedule 10 - Probate & Administration', category: 'Succession' },
-  { id: 'schedule_11_tribunals', label: 'Schedule 11 - Tribunals Other Than Schedules 8 & 9 (TAT, Co-op)', category: 'Tribunals' },
-  { id: 'schedule_12_patents', label: 'Schedule 12 - Patents, Utility Models & Industrial Designs (KIPI)', category: 'Intellectual Property' },
-  { id: 'schedule_8_court_of_appeal', label: 'Appellate - Court of Appeal Civil & Criminal Appeals', category: 'Appeals' },
-  { id: 'schedule_9_supreme_court', label: 'Appellate - Supreme Court Petitions & References', category: 'Appeals' },
+  { id: 'schedule_1_conveyancing', label: 'Schedule 1 — Conveyancing: Sales, Purchases, Mortgages & Charges', category: 'Conveyancing' },
+  { id: 'schedule_2_leases', label: 'Schedule 2 — Leases & Tenancies at a Rack Rent', category: 'Leases' },
+  { id: 'schedule_3_companies', label: 'Schedule 3 — Formation & Incorporation of Companies', category: 'Commercial' },
+  { id: 'schedule_4_ip', label: 'Schedule 4 — Trade Marks (L.N. 35/2014)', category: 'Intellectual Property' },
+  { id: 'schedule_5_chattels', label: 'Schedule 5 — General Advisory & Chattels Transfer', category: 'General & Securities' },
+  { id: 'schedule_6_high_court', label: 'Schedule 6 — High Court & Commercial Litigation (L.N. 35/2014)', category: 'Litigation' },
+  { id: 'schedule_7_magistrate', label: 'Schedule 7 — Subordinate & Magistrates Courts (L.N. 45/2014)', category: 'Litigation' },
+  { id: 'schedule_8_bprt', label: 'Schedule 8 — Business Premises Rent Tribunal (Cap. 301 - BPRT)', category: 'Tribunals' },
+  { id: 'schedule_9_rrt', label: 'Schedule 9 — Rent Restriction Tribunal (Cap. 296 - RRT)', category: 'Tribunals' },
+  { id: 'schedule_10_probate', label: 'Schedule 10 — Probate & Estate Administration', category: 'Succession' },
+  { id: 'schedule_11_tribunals', label: 'Schedule 11 — Special Tribunals (TAT, Co-operative, Energy)', category: 'Tribunals' },
+  { id: 'schedule_12_patents', label: 'Schedule 12 — Patents, Utility Models & Designs (KIPI)', category: 'Intellectual Property' },
+  { id: 'schedule_8_court_of_appeal', label: 'Appellate — Court of Appeal Civil & Criminal Appeals', category: 'Appeals' },
+  { id: 'schedule_9_supreme_court', label: 'Appellate — Supreme Court Petitions & References', category: 'Appeals' },
 ];
 
 const normalizeScheduleKey = (val?: string): string => {
@@ -75,12 +78,13 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
   onNavigateToTab,
   currentUser,
 }) => {
+  const activeFirm = getActiveFirmProfile();
   // Stepper Stage State (1: Parties/Client, 2: Tariff & Scale, 3: Folios & Disbursements, 4: Endorsement/Remittance)
   const [activeStep, setActiveStep] = useState<number>(() => isPreview ? 4 : 1);
 
   // Document Classification
   const [docType, setDocType] = useState<string>(() => {
-    return (initialNote as any)?.documentType || 'party_party';
+    return (initialNote as any)?.documentType || 'fee_note';
   });
 
   // Matter & Court Info
@@ -98,11 +102,15 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
   const [clientAddress, setClientAddress] = useState(
     'Riverside Green Suites, 4th Floor\nP.O. Box 72892-00200\nNairobi, Kenya'
   );
+  const [clientEmail, setClientEmail] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [isEmailing, setIsEmailing] = useState(false);
+  const [isWhatsAppSending, setIsWhatsAppSending] = useState(false);
   const [bankDetailsText, setBankDetailsText] = useState(
-    EXACT_FIRM_INFO.bankDetails || 'KCB Bank Kenya Ltd | Kilimani Branch | A/C No: 1104889922 | Swift: KCBLKENX'
+    activeFirm.bankDetails || 'KCB Bank Kenya Ltd | Kilimani Branch | A/C No: 1104889922 | Swift: KCBLKENX'
   );
   const [paymentTermsText, setPaymentTermsText] = useState(
-    'Payment is due upon presentation within 30 days.\nDirect EFT / RTGS or Cheque payable to Nyagah B. Kithinji & Co. Advocates.'
+    'Payment is due upon presentation within 30 days.\nDirect EFT / RTGS or Cheque payable to ${activeFirm.name}.'
   );
   const [signatoryName, setSignatoryName] = useState(
     currentUser?.fullName || EXACT_FIRM_INFO.user.name || 'Guyo Halake'
@@ -178,7 +186,7 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
 
   // Service & Filing Addresses (For Court Bills)
   const [drawnByAddress, setDrawnByAddress] = useState(
-    `${EXACT_FIRM_INFO.name}\n${EXACT_FIRM_INFO.address}\n${EXACT_FIRM_INFO.poBox}\nNAIROBI`
+    `${activeFirm.name}\n${activeFirm.address}\n${activeFirm.poBox}\nNAIROBI`
   );
   const [servedUponAddress, setServedUponAddress] = useState('');
 
@@ -199,6 +207,8 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
 
   // Sharing & Feedback Toasts
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [showPdfPreview, setShowPdfPreview] = useState(true);
   const [shareMode, setShareMode] = useState<'none' | 'email' | 'whatsapp'>('none');
   const [shareInput, setShareInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -414,7 +424,7 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
           matterTitle,
           totalAmount: result?.grand_total || 0,
           dateBilled,
-          signatoryName: EXACT_FIRM_INFO.name,
+          signatoryName: activeFirm.name,
           lskNumber: 'ADMIN/2026/001'
         });
         if (isMounted) setSecurityRecord(sec);
@@ -476,12 +486,12 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
     const oppRole = isDef ? 'CLAIMANT' : 'RESPONDENT';
 
     setDrawnByAddress(
-      `${EXACT_FIRM_INFO.name.toUpperCase()}
+      `${activeFirm.name.toUpperCase()}
 ADVOCATES FOR THE ${roleLabel}
-${EXACT_FIRM_INFO.address.toUpperCase()}
-${EXACT_FIRM_INFO.poBox.toUpperCase()}
-TEL: ${EXACT_FIRM_INFO.phone}
-EMAIL: ${EXACT_FIRM_INFO.email}`
+${activeFirm.address.toUpperCase()}
+${activeFirm.poBox.toUpperCase()}
+TEL: ${activeFirm.phone}
+EMAIL: ${activeFirm.email}`
     );
 
     setServedUponAddress(
@@ -502,14 +512,12 @@ NAIROBI, KENYA
     if (!c) return;
 
     setClientName(c.name);
+    if (c.email) setClientEmail(c.email);
+    if (c.phonePrimary || c.phone) setClientPhone(c.phonePrimary || c.phone || '');
     if (c.company) {
-      setClientAddress(`${c.company}
-${c.email ? `Email: ${c.email}
-` : ''}${c.phonePrimary ? `Tel: ${c.phonePrimary}` : ''}`);
+      setClientAddress(`${c.company}\n${c.email ? `Email: ${c.email}\n` : ''}${c.phonePrimary ? `Tel: ${c.phonePrimary}` : ''}`);
     } else if (c.email || c.phonePrimary) {
-      setClientAddress(`${c.name}
-${c.email ? `Email: ${c.email}
-` : ''}${c.phonePrimary ? `Tel: ${c.phonePrimary}` : ''}`);
+      setClientAddress(`${c.name}\n${c.email ? `Email: ${c.email}\n` : ''}${c.phonePrimary ? `Tel: ${c.phonePrimary}` : ''}`);
     }
     triggerToast('success', `Selected client: ${c.name}`);
   };
@@ -525,11 +533,11 @@ ${c.email ? `Email: ${c.email}
       const wsData: any[][] = [];
 
       if (docType === 'fee_note') {
-        wsData.push([EXACT_FIRM_INFO.name]);
+        wsData.push([activeFirm.name]);
         wsData.push(['ADVOCATES OF THE HIGH COURT OF KENYA']);
-        wsData.push([EXACT_FIRM_INFO.fullLocation]);
-        wsData.push([`P.O. Box: ${EXACT_FIRM_INFO.poBox} | Tel: ${EXACT_FIRM_INFO.phone}`]);
-        wsData.push([`Email: ${EXACT_FIRM_INFO.email} | KRA PIN: ${EXACT_FIRM_INFO.kraPin}`]);
+        wsData.push([(activeFirm.fullLocation || activeFirm.address)]);
+        wsData.push([`P.O. Box: ${activeFirm.poBox} | Tel: ${activeFirm.phone}`]);
+        wsData.push([`Email: ${activeFirm.email} | KRA PIN: ${activeFirm.kraPin}`]);
         wsData.push([]);
         wsData.push(['ADVOCATE-CLIENT PROFORMA FEE NOTE']);
         wsData.push([`Invoice Ref: ${documentRef}`, '', '', `Date: ${formatLegalDate(dateBilled)}`]);
@@ -570,7 +578,7 @@ ${c.email ? `Email: ${c.email}
         wsData.push(['', '', '', 'GRAND TOTAL AMOUNT DUE (KES):', result?.grand_total || 0]);
         wsData.push([]);
         wsData.push(['BANK DETAILS FOR SETTLEMENT:']);
-        wsData.push([EXACT_FIRM_INFO.bankDetails]);
+        wsData.push([activeFirm.bankDetails]);
       } else {
         // RULE 69 5-COLUMN COURT TAXATION BILL OF COSTS FORMAT
         wsData.push(['REPUBLIC OF KENYA']);
@@ -858,546 +866,690 @@ ${c.email ? `Email: ${c.email}
     }
   };
 
-  // High-Fidelity Vector PDF Export (Tailored to Document Classification)
-  const handleDownloadPDF = async () => {
-    setIsExportingPdf(true);
-    triggerToast('loading', docType === 'fee_note' ? 'Generating official Client Fee Note PDF...' : 'Generating official High Court vector PDF...', 0);
-
+  // Helper to load image as Base64 for jsPDF
+  const getBase64ImageFromUrl = async (url: string): Promise<string | null> => {
     try {
-      await persistNoteToDatabase('processed');
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return new Promise<string | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
 
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageWidth = doc.internal.pageSize.getWidth();
+  // High-Fidelity Vector PDF Generator (Returns jsPDF instance)
+  // High-Fidelity Vector PDF Generator (Pure Minimalist 1-Page Layout)
+  const generatePdfDocument = async (): Promise<jsPDF> => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
 
-      // Letterhead
+    // 1. Fetch real logo if available (Transparent, zero background box)
+    const logoUrl = activeFirm.logoUrl || '/logo.png';
+    const logoBase64 = await getBase64ImageFromUrl(logoUrl).catch(() => null);
+
+    // Letterhead block
+    let headerTextX = 14;
+    if (logoBase64) {
+      try {
+        doc.addImage(logoBase64, 'PNG', 14, 10, 13, 13);
+        headerTextX = 30;
+      } catch (e) {
+        headerTextX = 14;
+      }
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(0);
+    doc.text(activeFirm.name, headerTextX, 14);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text('ADVOCATES & COMMISSIONERS FOR OATHS', headerTextX, 17.5);
+
+    doc.setFontSize(6.5);
+    doc.text(`LSK Reg: ADMIN/2026/001 | KRA PIN: ${activeFirm.kraPin || 'P051123456Z'}`, headerTextX, 21);
+
+    // Right-aligned Firm Contact & Ref
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(activeFirm.address, pageWidth - 14, 11.5, { align: 'right' });
+    doc.text(activeFirm.poBox, pageWidth - 14, 15, { align: 'right' });
+    doc.text(`${activeFirm.phone} | ${activeFirm.email}`, pageWidth - 14, 18.5, { align: 'right' });
+    doc.text(`Ref: ${documentRef}`, pageWidth - 14, 22, { align: 'right' });
+
+    // Single crisp header divider
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.3);
+    doc.line(14, 25, pageWidth - 14, 25);
+
+    // ==========================================
+    // BRANCH: FEE NOTE PROFORMA PDF LAYOUT
+    // ==========================================
+    if (docType === 'fee_note') {
+      let curY = 30;
+
+      // Title
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
-      doc.text(EXACT_FIRM_INFO.name, 14, 15);
-      doc.setFontSize(7.5);
-      doc.text('ADVOCATES OF THE HIGH COURT OF KENYA', 14, 19);
+      doc.setTextColor(0);
+      doc.text('PROFESSIONAL FEE NOTE', 14, curY);
+      curY += 5;
+
+      // Metadata Grid (Clean typography, NO background cards or fills)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(0);
+      doc.text('BILLED TO / INSTRUCTING CLIENT:', 14, curY);
+
+      doc.setFontSize(8);
+      doc.text(clientName || claimantName || 'Client Name', 14, curY + 3.8);
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7);
-      doc.text(EXACT_FIRM_INFO.address, pageWidth - 14, 13, { align: 'right' });
-      doc.text(EXACT_FIRM_INFO.poBox, pageWidth - 14, 16.5, { align: 'right' });
-      doc.text(`${EXACT_FIRM_INFO.phone} | ${EXACT_FIRM_INFO.email}`, pageWidth - 14, 20, { align: 'right' });
+      const addrLines = (clientAddress || '').split('\n').filter(Boolean);
+      let clientY = curY + 7.2;
+      addrLines.slice(0, 3).forEach(al => {
+        doc.text(al, 14, clientY);
+        clientY += 3.2;
+      });
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`FEE NOTE NO: ${documentRef}`, pageWidth - 65, curY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`DATE: ${formatLegalDate(dateBilled)}`, pageWidth - 65, curY + 3.8);
+      doc.text(`KRA PIN: ${activeFirm.kraPin || 'P051123456Z'}`, pageWidth - 65, curY + 7.4);
+      doc.text(`VAT REG: ${activeFirm.vatNumber || 'VAT-0192834-K'}`, pageWidth - 65, curY + 11);
+
+      curY = Math.max(clientY + 1, curY + 15);
+
+      // Subject RE: (NO background fill, crisp divider rules)
+      doc.setDrawColor(0);
+      doc.setLineWidth(0.2);
+      doc.line(14, curY, pageWidth - 14, curY);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0);
+      const subjectText = `RE: ${(matterTitle || 'Professional Legal Services Rendered').toUpperCase()}`;
+      doc.text(subjectText.slice(0, 115), 14, curY + 4.2);
+      doc.line(14, curY + 6, pageWidth - 14, curY + 6);
+      curY += 8.5;
+
+      // Table Construction (NO background colors on rows/headers)
+      const tableHead = [['#', 'PARTICULARS OF LEGAL SERVICES RENDERED', 'STATUTORY BASIS / REFERENCE', 'AMOUNT (KES)']];
+      const tableBody: any[] = [];
+
+      tableBody.push([
+        { content: '', styles: { fontStyle: 'bold' } },
+        { content: 'SECTION A: PROFESSIONAL LEGAL FEES (PROFIT COSTS)', colSpan: 2, styles: { fontStyle: 'bold', textColor: 0 } },
+        { content: '' }
+      ]);
+
+      const instrText = isCustomInstruction && customInstructionFee
+        ? `Instruction Fees: Agreed Retainer under Section 45 Advocates Act.`
+        : claimValue
+        ? `Instruction Fees: Ad valorem scale fee based on transaction/claim value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}.`
+        : `Instruction Fees: Statutory Minimum Scale Fee under Advocates (Remuneration) Order.`;
+
+      tableBody.push([
+        { content: '1', styles: { halign: 'center', fontStyle: 'bold' } },
+        { content: instrText },
+        { content: STATUTORY_SCHEDULES.find(s => s.id === courtSchedule)?.label?.slice(0, 36) || 'Statutory Tariff' },
+        { content: (result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } }
+      ]);
+
+      items.forEach((it, idx) => {
+        tableBody.push([
+          { content: String(idx + 2), styles: { halign: 'center' } },
+          { content: it.description },
+          { content: 'Itemized Attendances' },
+          { content: (it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } }
+        ]);
+      });
+
+      tableBody.push([
+        { content: '', styles: { fontStyle: 'bold' } },
+        { content: 'Subtotal Professional Legal Fees', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: (result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } }
+      ]);
+
+      tableBody.push([
+        { content: '', styles: { fontStyle: 'bold' } },
+        { content: applyVat ? 'Value Added Tax (16% on Professional Fees — VAT Act 2013)' : 'Value Added Tax (16% — Exempt)', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: (applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } }
+      ]);
+
+      if (extraExpenses.length > 0) {
+        tableBody.push([
+          { content: '', styles: { fontStyle: 'bold' } },
+          { content: 'SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)', colSpan: 2, styles: { fontStyle: 'bold', textColor: 0 } },
+          { content: '' }
+        ]);
+
+        extraExpenses.forEach((exp, idx) => {
+          tableBody.push([
+            { content: `D${idx + 1}`, styles: { halign: 'center' } },
+            { content: `${exp.description} (Receipts attached)` },
+            { content: 'Direct Reimbursement' },
+            { content: (exp.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } }
+          ]);
+        });
+
+        tableBody.push([
+          { content: '', styles: { fontStyle: 'bold' } },
+          { content: 'Total Out-of-Pocket Disbursements', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
+          { content: (result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } }
+        ]);
+      }
+
+      tableBody.push([
+        { content: '', styles: { fontStyle: 'bold' } },
+        { content: 'TOTAL AMOUNT DUE FOR REMITTANCE (KES)', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right', textColor: 0 } },
+        { content: (result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right', textColor: 0 } }
+      ]);
+
+      autoTable(doc, {
+        startY: curY,
+        head: tableHead,
+        body: tableBody,
+        theme: 'plain',
+        styles: { font: 'helvetica', fontSize: 7, cellPadding: 1.8, lineWidth: 0.15, lineColor: 0, textColor: 0 },
+        headStyles: { fontStyle: 'bold', fillColor: false, textColor: 0, halign: 'center', lineWidth: 0.2, lineColor: 0 },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 'auto' },
+          2: { cellWidth: 46 },
+          3: { cellWidth: 32, halign: 'right' }
+        },
+        margin: { left: 14, right: 14, top: 14, bottom: 14 },
+      });
+
+      // Payment Information (Clean lines, bank & mpesa details, NO boilerplate, NO QR code here)
+      const finalTableY = (doc as any).lastAutoTable.finalY;
+      let payY = finalTableY + 4;
+      if (payY > 218) payY = 218;
 
       doc.setDrawColor(0);
-      doc.setLineWidth(0.3);
-      doc.line(14, 22.5, pageWidth - 14, 22.5);
+      doc.setLineWidth(0.2);
+      doc.line(14, payY, pageWidth - 14, payY);
 
-      // ==========================================
-      // BRANCH: FEE NOTE PROFORMA PDF LAYOUT
-      // ==========================================
-      if (docType === 'fee_note') {
-        let curY = 28;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(13);
-        doc.text('PROFESSIONAL FEE NOTE', 14, curY);
-        curY += 6;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(0);
+      doc.text('Payment Information', 14, payY + 4);
 
-        // Metadata grid (Billed to on left, Ref/Date on right)
-        doc.setFontSize(7.5);
-        doc.setFont('helvetica', 'bold');
-        doc.text('BILLED TO / INSTRUCTING CLIENT:', 14, curY);
-        doc.text('FEE NOTE DETAILS:', pageWidth - 70, curY);
-        curY += 4;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.text(`Bank: ${activeFirm.bankName || 'KCB Bank Kenya'} | Branch: ${activeFirm.bankBranch || 'Riverside'} | Account No: ${activeFirm.bankAccount || '1104889922'} | Swift: ${activeFirm.swiftCode || 'KCBLKENX'}`, 14, payY + 7.8);
+      doc.text(`M-Pesa Paybill: ${activeFirm.mpesaPaybill || '522522'} | Account Ref: ${documentRef}`, 14, payY + 11.2);
 
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.text(clientName || claimantName || 'Client Name', 14, curY);
-        doc.text(`Ref: ${documentRef}`, pageWidth - 70, curY);
-        curY += 4;
+      doc.line(14, payY + 13.5, pageWidth - 14, payY + 13.5);
 
-        const addrLines = (clientAddress || '').split('\n');
-        addrLines.forEach(al => {
-          doc.text(al, 14, curY);
-          curY += 3.5;
-        });
+      // Endorsement & Signature Block on the SAME LINE
+      let endY = payY + 18;
+      if (endY > 245) endY = 245;
 
-        doc.text(`Date: ${formatLegalDate(dateBilled)}`, pageWidth - 70, curY - (addrLines.length * 3.5) + 3.5);
-        doc.text(`KRA PIN: ${EXACT_FIRM_INFO.kraPin || 'P051123456Z'}`, pageWidth - 70, curY - (addrLines.length * 3.5) + 7);
-        doc.text(`VAT Reg: ${(EXACT_FIRM_INFO as any).vatNumber || 'VAT-0192834-K'}`, pageWidth - 70, curY - (addrLines.length * 3.5) + 10.5);
+      // Left: Dated & Ref
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0);
+      doc.text(`Dated: ${formatLegalDate(dateBilled)}`, 14, endY + 4);
+      doc.setFontSize(7);
+      doc.text(`Ref: ${documentRef}`, 14, endY + 8);
 
-        curY = Math.max(curY + 2, 48);
+      // Center/Right: Signature blank line & Endorsement
+      const sigX = pageWidth / 2 + 10;
+      const sigLineWidth = 70;
+      const sigCenter = sigX + sigLineWidth / 2;
+      const lineY = endY + 4;
 
-        // Subject matter banner
-        doc.setFillColor(245, 245, 245);
-        doc.rect(14, curY, pageWidth - 28, 9, 'F');
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.text(`RE: ${(matterTitle || 'Professional Legal Services Rendered').toUpperCase()}`, 16, curY + 6);
-        curY += 12;
-
-        // Table for Fee Note
-        const tableHead = [['#', 'PARTICULARS OF LEGAL SERVICES RENDERED', 'STATUTORY BASIS / REFERENCE', 'AMOUNT (KES)']];
-        const tableBody: any[] = [];
-
-        // Section A: Professional Fees
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-          { content: 'SECTION A: PROFESSIONAL LEGAL FEES (PROFIT COSTS)', colSpan: 2, styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-          { content: '', styles: { fillColor: [245, 245, 245] } }
-        ]);
-
-        const instrText = isCustomInstruction && customInstructionFee
-          ? `Instruction Fees: Agreed Retainer under Section 45 Advocates Act.`
-          : claimValue
-          ? `Instruction Fees: Ad valorem scale fee based on transaction/claim value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}.`
-          : `Instruction Fees: Statutory Minimum Scale Fee under Advocates (Remuneration) Order.`;
-
-        tableBody.push([
-          { content: '1', styles: { halign: 'center', fontStyle: 'bold' } },
-          { content: instrText },
-          { content: STATUTORY_SCHEDULES.find(s => s.id === courtSchedule)?.label || courtSchedule },
-          { content: (result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } }
-        ]);
-
-        items.forEach((it, idx) => {
-          tableBody.push([
-            { content: String(idx + 2), styles: { halign: 'center' } },
-            { content: it.description },
-            { content: 'Itemized Professional Attendances' },
-            { content: (it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } }
-          ]);
-        });
-
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold' } },
-          { content: 'Subtotal Professional Legal Fees', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
-          { content: (result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } }
-        ]);
-
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold' } },
-          { content: applyVat ? 'Value Added Tax (16% on Professional Fees — VAT Act 2013)' : 'Value Added Tax (16% — Exempt)', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
-          { content: (applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } }
-        ]);
-
-        // Section B: Disbursements
-        if (extraExpenses.length > 0) {
-          tableBody.push([
-            { content: '', styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-            { content: 'SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)', colSpan: 2, styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-            { content: '', styles: { fillColor: [245, 245, 245] } }
-          ]);
-
-          extraExpenses.forEach((exp, idx) => {
-            tableBody.push([
-              { content: `D${idx + 1}`, styles: { halign: 'center' } },
-              { content: `${exp.description} (Receipts attached)` },
-              { content: 'Direct Reimbursement' },
-              { content: (exp.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } }
-            ]);
-          });
-
-          tableBody.push([
-            { content: '', styles: { fontStyle: 'bold' } },
-            { content: 'Total Out-of-Pocket Disbursements', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
-            { content: (result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } }
-          ]);
-        }
-
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold', fillColor: [230, 230, 230] } },
-          { content: 'TOTAL AMOUNT DUE FOR REMITTANCE (KES)', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right', fillColor: [230, 230, 230] } },
-          { content: (result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right', fillColor: [230, 230, 230] } }
-        ]);
-
-        autoTable(doc, {
-          startY: curY,
-          head: tableHead,
-          body: tableBody,
-          theme: 'plain',
-          styles: { font: 'helvetica', fontSize: 7.5, cellPadding: 2, lineWidth: 0.15, lineColor: 0 },
-          headStyles: { fontStyle: 'bold', fillColor: [240, 240, 240], halign: 'center' },
-          columnStyles: {
-            0: { cellWidth: 10, halign: 'center' },
-            1: { cellWidth: 'auto' },
-            2: { cellWidth: 50 },
-            3: { cellWidth: 32, halign: 'right' }
-          },
-          margin: { left: 14, right: 14, top: 14, bottom: 20 },
-        });
-
-        // Banking & Remittance Block
-        const finalY = (doc as any).lastAutoTable.finalY + 6;
-        let remY = finalY;
-
-        doc.setFillColor(248, 248, 248);
-        doc.rect(14, remY, pageWidth - 28, 22, 'F');
-        doc.setDrawColor(200);
-        doc.rect(14, remY, pageWidth - 28, 22, 'S');
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7);
-        doc.text('PAYMENT & REMITTANCE INSTRUCTIONS:', 18, remY + 5);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.5);
-        doc.text(`Bank: ${bankDetailsText}`, 18, remY + 9);
-        const termsLines = (paymentTermsText || '').split('\n');
-        termsLines.forEach((tl, i) => {
-          doc.text(tl, 18, remY + 13 + (i * 3.5));
-        });
-
-        // Generous bottom spacing pushing sign-off gracefully towards the very bottom of the page
-        let endY = remY + 26;
-        if (endY > 218) {
-          doc.addPage();
-          endY = 190;
-        } else {
-          endY = Math.max(endY + 20, 218);
-        }
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.text(`DATED at NAIROBI this ${formatLegalDate(dateBilled)}`, 14, endY);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7);
-        doc.setTextColor(80);
-        doc.text(`Ref: ${documentRef}`, pageWidth - 14, endY, { align: 'right' });
-        doc.setTextColor(0);
-
-        doc.setDrawColor(0);
-        doc.setLineWidth(0.2);
-        doc.line(14, endY + 2.5, pageWidth - 14, endY + 2.5);
-
-        const centerX = pageWidth / 2;
-        const lineY = endY + 24;
-
-        // Official Firm Stamp PNG on top, hidden micro-QR underneath
-        if (stampOfficial) {
-          const stampSize = 26; // mm
-          const stampX = centerX - stampSize / 2;
-          const stampY = lineY - stampSize + 2;
-
-          // Draw micro-QR first (very faint — cryptographic hidden layer)
-          if (securityRecord?.qrCodeDataUrl) {
-            const qrSize = 8;
-            doc.setGState(new (doc as any).GState({ opacity: 0.12 }));
-            doc.addImage(securityRecord.qrCodeDataUrl, 'PNG', centerX - qrSize / 2, stampY + (stampSize / 2) - qrSize / 2, qrSize, qrSize);
-            doc.setGState(new (doc as any).GState({ opacity: 1 }));
-          }
-
-          // Real stamp PNG on top
-          try {
-            doc.addImage(stampImageUrl, 'PNG', stampX, stampY, stampSize, stampSize);
-          } catch {
-            // Fallback: fetch and embed
-            const resp = await fetch(stampImageUrl);
+      // Official Stamp on line if checked
+      if (stampOfficial) {
+        const stampSize = 22;
+        const stampX = sigCenter - stampSize / 2;
+        const stampY = lineY - stampSize + 4;
+        try {
+          doc.addImage(stampImageUrl, 'PNG', stampX, stampY, stampSize, stampSize);
+        } catch {
+          const resp = await fetch(stampImageUrl).catch(() => null);
+          if (resp && resp.ok) {
             const blob = await resp.blob();
             const b64 = await new Promise<string>(res => { const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.readAsDataURL(blob); });
             doc.addImage(b64, 'PNG', stampX, stampY, stampSize, stampSize);
           }
-        }
-
-        // Centered signature line
-        doc.setDrawColor(0);
-        doc.setLineWidth(0.3);
-        doc.line(centerX - 35, lineY, centerX + 35, lineY);
-
-        // Centered firm endorsement without person name
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(0);
-        doc.text(EXACT_FIRM_INFO.name, centerX, lineY + 4.5, { align: 'center' });
-        doc.setFontSize(7);
-        doc.text('ADVOCATES & COMMISSIONERS FOR OATHS', centerX, lineY + 8, { align: 'center' });
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.5);
-        doc.setTextColor(90);
-        doc.text('LSK Practicing No. ADMIN/2026/001', centerX, lineY + 11.5, { align: 'center' });
-        doc.setTextColor(0);
-
-      } else {
-        // ==========================================
-        // BRANCH: COURT BILL OF COSTS PDF LAYOUT
-        // ==========================================
-        let curY = 28;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        const forumLines = (forumName || 'REPUBLIC OF KENYA\nIN THE HIGH COURT OF KENYA').split('\n');
-        forumLines.forEach(fl => {
-          doc.text(fl, pageWidth / 2, curY, { align: 'center' });
-          curY += 4;
-        });
-
-        if (matterTitle) {
-          doc.setFontSize(8);
-          doc.text(matterTitle, pageWidth / 2, curY, { align: 'center' });
-          curY += 4.5;
-        }
-
-        // Parties Caption Box
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.text(claimantName || clientName || 'Claimant', 16, curY);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7);
-        doc.text(isDefendant ? 'RESPONDENT' : 'CLAIMANT', pageWidth - 16, curY, { align: 'right' });
-        curY += 3.5;
-        doc.text('— VERSUS —', pageWidth / 2, curY, { align: 'center' });
-        curY += 3.5;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.text(respondentName || 'Respondent', 16, curY);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7);
-        doc.text(isDefendant ? 'CLAIMANT' : 'RESPONDENT', pageWidth - 16, curY, { align: 'right' });
-        curY += 4.5;
-
-        if (judgeName) {
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(7.5);
-          doc.text(judgeName, pageWidth / 2, curY, { align: 'center' });
-          curY += 4.5;
-        }
-
-        // Title & Subtitle
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.text(getDocumentTitle(), pageWidth / 2, curY, { align: 'center' });
-        curY += 3.5;
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.5);
-        doc.text(getDocumentSubtitle(), pageWidth / 2, curY, { align: 'center' });
-        curY += 4;
-
-        // Table Data
-        const tableHead = [['DATE', 'ITEM NO.', 'PARTICULARS OF SERVICES RENDERED', 'AMOUNT CLAIMED', 'AMOUNT TAXED OFF']];
-        const tableBody: any[] = [];
-
-        // Section A: Profit Costs
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-          { content: '', styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-          { content: 'SECTION A: PROFIT COSTS & PROFESSIONAL SERVICES', colSpan: 3, styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } }
-        ]);
-
-        const instrText = isCustomInstruction && customInstructionFee
-          ? `Instruction Fees: Agreed / Assessed under Section 45 Advocates Act (Agreed retainer fee in this matter).`
-          : claimValue
-          ? `Instruction Fees: To receiving instructions to act on behalf of the ${isDefendant ? 'Respondent' : 'Claimant'}. Ad valorem scale based on subject value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })} under ${courtSchedule.replace(/_/g, ' ')}${docType === 'advocate_client' ? ' (+50% Statutory Uplift under Part B)' : ''}.`
-          : `Instruction Fees: Statutory Minimum Floor under Schedule 6 Item 1(a) (L.N. 35/2014) for non-monetary / unquantified subject matter${docType === 'advocate_client' ? ' (+50% Statutory Uplift under Part B)' : ''}.`;
-
-        tableBody.push([
-          { content: formatLegalDate(dateBilled) },
-          { content: '1', styles: { halign: 'center', fontStyle: 'bold' } },
-          { content: instrText },
-          { content: (result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } },
-          { content: '' }
-        ]);
-
-        if ((result?.getting_up_fee || 0) > 0) {
-          tableBody.push([
-            { content: formatLegalDate(dateBilled) },
-            { content: '2', styles: { halign: 'center', fontStyle: 'bold' } },
-            { content: 'Getting-up Fee: Preparation for trial in defended proceedings (statutory one-third (1/3) of Instruction Fee per Sched. 6 Item 2).' },
-            { content: (result?.getting_up_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } },
-            { content: '' }
-          ]);
-        }
-
-        items.forEach((it, idx) => {
-          tableBody.push([
-            { content: formatLegalDate(dateBilled) },
-            { content: String(idx + ((result?.getting_up_fee || 0) > 0 ? 3 : 2)), styles: { halign: 'center' } },
-            { content: it.description },
-            { content: (it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } },
-            { content: '' }
-          ]);
-        });
-
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold' } },
-          { content: '', styles: { fontStyle: 'bold' } },
-          { content: 'Subtotal Professional Legal Fees (Profit Costs)', styles: { fontStyle: 'bold', halign: 'right' } },
-          { content: (result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } },
-          { content: '' }
-        ]);
-
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold' } },
-          { content: '', styles: { fontStyle: 'bold' } },
-          { content: applyVat ? 'Value Added Tax (16% on Professional Fees — VAT Act 2013)' : 'Value Added Tax (16% — Exempt / Non-Taxable)', styles: { fontStyle: 'bold', halign: 'right' } },
-          { content: (applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } },
-          { content: '' }
-        ]);
-
-        // Section B: Disbursements
-        if (extraExpenses.length > 0) {
-          tableBody.push([
-            { content: '', styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-            { content: '', styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } },
-            { content: 'SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)', colSpan: 3, styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } }
-          ]);
-
-          extraExpenses.forEach((exp, idx) => {
-            tableBody.push([
-              { content: formatLegalDate(dateBilled) },
-              { content: `D${idx + 1}`, styles: { halign: 'center' } },
-              { content: `${exp.description} (Receipts/Vouchers attached)` },
-              { content: (exp.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } },
-              { content: '' }
-            ]);
-          });
-
-          tableBody.push([
-            { content: '', styles: { fontStyle: 'bold' } },
-            { content: '', styles: { fontStyle: 'bold' } },
-            { content: 'Total Out-of-Pocket Disbursements', styles: { fontStyle: 'bold', halign: 'right' } },
-            { content: (result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } },
-            { content: '' }
-          ]);
-        }
-
-        tableBody.push([
-          { content: '', styles: { fontStyle: 'bold', fillColor: [230, 230, 230] } },
-          { content: '', styles: { fontStyle: 'bold', fillColor: [230, 230, 230] } },
-          { content: 'GRAND TOTAL AMOUNT DUE (KES)', styles: { fontStyle: 'bold', halign: 'right', fillColor: [230, 230, 230] } },
-          { content: (result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right', fillColor: [230, 230, 230] } },
-          { content: '', styles: { fillColor: [230, 230, 230] } }
-        ]);
-
-        autoTable(doc, {
-          startY: curY,
-          head: tableHead,
-          body: tableBody,
-          theme: 'plain',
-          styles: { font: 'helvetica', fontSize: 7, cellPadding: 1.5, lineWidth: 0.15, lineColor: 0 },
-          headStyles: { fontStyle: 'bold', fillColor: [240, 240, 240], halign: 'center' },
-          columnStyles: {
-            0: { cellWidth: 20 },
-            1: { cellWidth: 12, halign: 'center' },
-            2: { cellWidth: 'auto' },
-            3: { cellWidth: 28, halign: 'right' },
-            4: { cellWidth: 24, halign: 'right' }
-          },
-          margin: { left: 14, right: 14, top: 14, bottom: 16 },
-          didDrawPage: (data) => {
-            const pageCount = (doc as any).getNumberOfPages ? (doc as any).getNumberOfPages() : (doc.internal.pages.length - 1);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(7);
-            doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 8, { align: 'right' });
-            doc.text(`Doc Ref: ${documentRef}`, 14, doc.internal.pageSize.getHeight() - 8);
-          }
-        });
-
-        // Endorsement & Execution Block on Court Bill PDF
-        const finalY = (doc as any).lastAutoTable.finalY + 6;
-        let endY = finalY;
-
-        // Generous bottom spacing pushing sign-off gracefully towards the very bottom of the page
-        if (endY > 212) {
-          doc.addPage();
-          endY = 190;
-        } else {
-          endY = Math.max(endY + 20, 212);
-        }
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.text(`DATED at NAIROBI this ${formatLegalDate(dateBilled)}`, 14, endY);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7);
-        doc.setTextColor(80);
-        doc.text(`Ref: ${documentRef}`, pageWidth - 14, endY, { align: 'right' });
-        doc.setTextColor(0);
-
-        doc.setDrawColor(0);
-        doc.setLineWidth(0.2);
-        doc.line(14, endY + 2.5, pageWidth - 14, endY + 2.5);
-
-        const centerX = pageWidth / 2;
-        const lineY = endY + 24;
-
-        // Official Firm Stamp PNG on top, hidden micro-QR underneath
-        if (stampOfficial) {
-          const stampSize = 26; // mm
-          const stampX = centerX - stampSize / 2;
-          const stampY = lineY - stampSize + 2;
-
-          // Draw micro-QR first (very faint — cryptographic hidden layer)
-          if (securityRecord?.qrCodeDataUrl) {
-            const qrSize = 8;
-            doc.setGState(new (doc as any).GState({ opacity: 0.12 }));
-            doc.addImage(securityRecord.qrCodeDataUrl, 'PNG', centerX - qrSize / 2, stampY + (stampSize / 2) - qrSize / 2, qrSize, qrSize);
-            doc.setGState(new (doc as any).GState({ opacity: 1 }));
-          }
-
-          // Real stamp PNG on top
-          try {
-            doc.addImage(stampImageUrl, 'PNG', stampX, stampY, stampSize, stampSize);
-          } catch {
-            const resp = await fetch(stampImageUrl);
-            const blob = await resp.blob();
-            const b64 = await new Promise<string>(res => { const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.readAsDataURL(blob); });
-            doc.addImage(b64, 'PNG', stampX, stampY, stampSize, stampSize);
-          }
-        }
-
-        // Centered signature line
-        doc.setDrawColor(0);
-        doc.setLineWidth(0.3);
-        doc.line(centerX - 35, lineY, centerX + 35, lineY);
-
-        // Centered firm endorsement without person name
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(0);
-        doc.text(EXACT_FIRM_INFO.name, centerX, lineY + 4.5, { align: 'center' });
-        doc.setFontSize(7);
-        const partyRole = docType === 'advocate_client'
-          ? 'ADVOCATES FOR THE APPLICANT'
-          : isDefendant
-          ? 'ADVOCATES FOR THE RESPONDENT'
-          : 'ADVOCATES FOR THE CLAIMANT';
-        doc.text(partyRole, centerX, lineY + 8, { align: 'center' });
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.5);
-        doc.setTextColor(90);
-        doc.text('LSK Practicing No. ADMIN/2026/001', centerX, lineY + 11.5, { align: 'center' });
-        doc.setTextColor(0);
-
-        // Space and separator line before service addresses
-        const serviceY = lineY + 16;
-        doc.setDrawColor(200);
-        doc.setLineWidth(0.15);
-        doc.line(14, serviceY, pageWidth - 14, serviceY);
-
-        // DRAWN & FILED BY and TO BE SERVED UPON
-        const addrHeaderY = serviceY + 4;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7);
-        doc.text('DRAWN & FILED BY:', 14, addrHeaderY);
-        doc.text('TO BE SERVED UPON:', pageWidth / 2 + 5, addrHeaderY);
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.5);
-        const drawnLines = drawnByAddress.split('\n');
-        drawnLines.forEach((dl, i) => {
-          doc.text(dl, 14, addrHeaderY + 3.5 + (i * 3));
-        });
-
-        if (servedUponAddress.trim()) {
-          const servedLines = servedUponAddress.split('\n');
-          servedLines.forEach((sl, i) => {
-            doc.text(sl, pageWidth / 2 + 5, addrHeaderY + 3.5 + (i * 3));
-          });
-        } else {
-          doc.setFont('helvetica', 'italic');
-          doc.setTextColor(120);
-          doc.text('[Opponent Advocate details to be endorsed upon filing and service]', pageWidth / 2 + 5, addrHeaderY + 3.5);
-          doc.setTextColor(0);
         }
       }
 
+      // Signature line
+      doc.setDrawColor(0);
+      doc.setLineWidth(0.3);
+      doc.line(sigX, lineY, sigX + sigLineWidth, lineY);
+
+      // Words right under signature line
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.text(activeFirm.name, sigCenter, lineY + 3.8, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.text('ADVOCATES & COMMISSIONERS FOR OATHS', sigCenter, lineY + 7.2, { align: 'center' });
+      doc.setFontSize(6);
+      doc.text('LSK Practicing Roll: ADMIN/2026/001', sigCenter, lineY + 10.4, { align: 'center' });
+
+      // Confirmation QR code right under the words!
+      if (securityRecord?.qrCodeDataUrl) {
+        const qrSize = 16;
+        const qrX = sigCenter - qrSize / 2;
+        const qrY = lineY + 12.5;
+        try {
+          doc.addImage(securityRecord.qrCodeDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+          doc.setFontSize(5);
+          doc.text('Scan to verify authenticity', sigCenter, qrY + qrSize + 2.2, { align: 'center' });
+        } catch (e) {
+          console.warn('QR code embed notice:', e);
+        }
+      }
+
+    } else {
+      // ==========================================
+      // BRANCH: COURT BILL OF COSTS PDF LAYOUT
+      // ==========================================
+      let curY = 30;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(0);
+      const forumLines = (forumName || 'REPUBLIC OF KENYA\nIN THE HIGH COURT OF KENYA').split('\n');
+      forumLines.forEach(fl => {
+        doc.text(fl, pageWidth / 2, curY, { align: 'center' });
+        curY += 4;
+      });
+
+      if (matterTitle) {
+        doc.setFontSize(8);
+        doc.text(matterTitle, pageWidth / 2, curY, { align: 'center' });
+        curY += 4.5;
+      }
+
+      // Parties Caption Box
+      doc.setDrawColor(0);
+      doc.setLineWidth(0.2);
+      doc.rect(14, curY, pageWidth - 28, 16, 'S');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text(claimantName || clientName || 'Claimant', 16, curY + 4.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(isDefendant ? 'RESPONDENT' : 'CLAIMANT', pageWidth - 16, curY + 4.5, { align: 'right' });
+
+      doc.text('— VERSUS —', pageWidth / 2, curY + 8, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text(respondentName || 'Respondent', 16, curY + 12.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(isDefendant ? 'CLAIMANT' : 'RESPONDENT', pageWidth - 16, curY + 12.5, { align: 'right' });
+      curY += 19;
+
+      if (judgeName) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.text(judgeName, pageWidth / 2, curY, { align: 'center' });
+        curY += 4.5;
+      }
+
+      // Title & Subtitle
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.text(getDocumentTitle(), pageWidth / 2, curY, { align: 'center' });
+      curY += 3.5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.text(getDocumentSubtitle(), pageWidth / 2, curY, { align: 'center' });
+      curY += 4;
+
+      // Table Data (NO background colors)
+      const tableHead = [['DATE', 'ITEM NO.', 'PARTICULARS OF SERVICES RENDERED', 'AMOUNT CLAIMED', 'AMOUNT TAXED OFF']];
+      const tableBody: any[] = [];
+
+      tableBody.push([
+        { content: '' },
+        { content: '' },
+        { content: 'SECTION A: PROFIT COSTS & PROFESSIONAL SERVICES', colSpan: 3, styles: { fontStyle: 'bold', textColor: 0 } }
+      ]);
+
+      const instrText = isCustomInstruction && customInstructionFee
+        ? `Instruction Fees: Agreed / Assessed under Section 45 Advocates Act (Agreed retainer fee in this matter).`
+        : claimValue
+        ? `Instruction Fees: To receiving instructions to act on behalf of the ${isDefendant ? 'Respondent' : 'Claimant'}. Ad valorem scale based on subject value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })} under ${courtSchedule.replace(/_/g, ' ')}${docType === 'advocate_client' ? ' (+50% Statutory Uplift under Part B)' : ''}.`
+        : `Instruction Fees: Statutory Minimum Floor under Schedule 6 Item 1(a) (L.N. 35/2014) for non-monetary / unquantified subject matter${docType === 'advocate_client' ? ' (+50% Statutory Uplift under Part B)' : ''}.`;
+
+      tableBody.push([
+        { content: formatLegalDate(dateBilled) },
+        { content: '1', styles: { halign: 'center', fontStyle: 'bold' } },
+        { content: instrText },
+        { content: (result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } },
+        { content: '' }
+      ]);
+
+      if ((result?.getting_up_fee || 0) > 0) {
+        tableBody.push([
+          { content: formatLegalDate(dateBilled) },
+          { content: '2', styles: { halign: 'center', fontStyle: 'bold' } },
+          { content: 'Getting-up Fee: Preparation for trial in defended proceedings (statutory one-third (1/3) of Instruction Fee per Sched. 6 Item 2).' },
+          { content: (result?.getting_up_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: '' }
+        ]);
+      }
+
+      items.forEach((it, idx) => {
+        tableBody.push([
+          { content: formatLegalDate(dateBilled) },
+          { content: String(idx + ((result?.getting_up_fee || 0) > 0 ? 3 : 2)), styles: { halign: 'center' } },
+          { content: it.description },
+          { content: (it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } },
+          { content: '' }
+        ]);
+      });
+
+      tableBody.push([
+        { content: '' },
+        { content: '' },
+        { content: 'Subtotal Professional Legal Fees (Profit Costs)', styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: (result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: '' }
+      ]);
+
+      tableBody.push([
+        { content: '' },
+        { content: '' },
+        { content: applyVat ? 'Value Added Tax (16% on Professional Fees — VAT Act 2013)' : 'Value Added Tax (16% — Exempt / Non-Taxable)', styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: (applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: '' }
+      ]);
+
+      if (extraExpenses.length > 0) {
+        tableBody.push([
+          { content: '' },
+          { content: '' },
+          { content: 'SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)', colSpan: 3, styles: { fontStyle: 'bold', textColor: 0 } }
+        ]);
+
+        extraExpenses.forEach((exp, idx) => {
+          tableBody.push([
+            { content: formatLegalDate(dateBilled) },
+            { content: `D${idx + 1}`, styles: { halign: 'center' } },
+            { content: `${exp.description} (Receipts/Vouchers attached)` },
+            { content: (exp.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { halign: 'right' } },
+            { content: '' }
+          ]);
+        });
+
+        tableBody.push([
+          { content: '' },
+          { content: '' },
+          { content: 'Total Out-of-Pocket Disbursements', styles: { fontStyle: 'bold', halign: 'right' } },
+          { content: (result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right' } },
+          { content: '' }
+        ]);
+      }
+
+      tableBody.push([
+        { content: '' },
+        { content: '' },
+        { content: 'GRAND TOTAL AMOUNT DUE (KES)', styles: { fontStyle: 'bold', halign: 'right', textColor: 0 } },
+        { content: (result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right', textColor: 0 } },
+        { content: '' }
+      ]);
+
+      autoTable(doc, {
+        startY: curY,
+        head: tableHead,
+        body: tableBody,
+        theme: 'plain',
+        styles: { font: 'helvetica', fontSize: 7, cellPadding: 1.5, lineWidth: 0.15, lineColor: 0, textColor: 0 },
+        headStyles: { fontStyle: 'bold', fillColor: false, textColor: 0, halign: 'center', lineWidth: 0.2, lineColor: 0 },
+        columnStyles: {
+          0: { cellWidth: 20 },
+          1: { cellWidth: 12, halign: 'center' },
+          2: { cellWidth: 'auto' },
+          3: { cellWidth: 28, halign: 'right' },
+          4: { cellWidth: 24, halign: 'right' }
+        },
+        margin: { left: 14, right: 14, top: 14, bottom: 16 },
+        didDrawPage: (data) => {
+          const pageCount = (doc as any).getNumberOfPages ? (doc as any).getNumberOfPages() : (doc.internal.pages.length - 1);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7);
+          doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 8, { align: 'right' });
+          doc.text(`Doc Ref: ${documentRef}`, 14, doc.internal.pageSize.getHeight() - 8);
+        }
+      });
+
+      // Endorsement & Execution Block
+      const finalY = (doc as any).lastAutoTable.finalY + 6;
+      let endY = finalY;
+
+      if (endY > 212) {
+        doc.addPage();
+        endY = 180;
+      } else {
+        endY = Math.max(endY + 12, 212);
+      }
+
+      // Left: Dated & Ref
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0);
+      doc.text(`Dated: ${formatLegalDate(dateBilled)}`, 14, endY + 4);
+      doc.setFontSize(7);
+      doc.text(`Ref: ${documentRef}`, 14, endY + 8);
+
+      // Center: Signature line & Endorsement
+      const sigX = pageWidth / 2 + 10;
+      const sigLineWidth = 70;
+      const sigCenter = sigX + sigLineWidth / 2;
+      const lineY = endY + 4;
+
+      if (stampOfficial) {
+        const stampSize = 22;
+        const stampX = sigCenter - stampSize / 2;
+        const stampY = lineY - stampSize + 4;
+        try {
+          doc.addImage(stampImageUrl, 'PNG', stampX, stampY, stampSize, stampSize);
+        } catch {
+          const resp = await fetch(stampImageUrl).catch(() => null);
+          if (resp && resp.ok) {
+            const blob = await resp.blob();
+            const b64 = await new Promise<string>(res => { const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.readAsDataURL(blob); });
+            doc.addImage(b64, 'PNG', stampX, stampY, stampSize, stampSize);
+          }
+        }
+      }
+
+      // Centered signature line
+      doc.setDrawColor(0);
+      doc.setLineWidth(0.3);
+      doc.line(sigX, lineY, sigX + sigLineWidth, lineY);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(0);
+      doc.text(activeFirm.name, sigCenter, lineY + 3.8, { align: 'center' });
+      doc.setFontSize(6.5);
+      const partyRole = docType === 'advocate_client'
+        ? 'ADVOCATES FOR THE APPLICANT'
+        : isDefendant
+        ? 'ADVOCATES FOR THE RESPONDENT'
+        : 'ADVOCATES FOR THE CLAIMANT';
+      doc.text(partyRole, sigCenter, lineY + 7.2, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6);
+      doc.text('LSK Practicing Roll: ADMIN/2026/001', sigCenter, lineY + 10.4, { align: 'center' });
+
+      // Confirmation QR code right under the words!
+      if (securityRecord?.qrCodeDataUrl) {
+        const qrSize = 16;
+        const qrX = sigCenter - qrSize / 2;
+        const qrY = lineY + 12.5;
+        try {
+          doc.addImage(securityRecord.qrCodeDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+          doc.setFontSize(5);
+          doc.text('Scan to verify authenticity', sigCenter, qrY + qrSize + 2.2, { align: 'center' });
+        } catch (e) {}
+      }
+
+      // Service addresses
+      const serviceY = lineY + 32;
+      doc.setDrawColor(0);
+      doc.setLineWidth(0.15);
+      doc.line(14, serviceY, pageWidth - 14, serviceY);
+
+      const addrHeaderY = serviceY + 4;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(0);
+      doc.text('DRAWN & FILED BY:', 14, addrHeaderY);
+      doc.text('TO BE SERVED UPON:', pageWidth / 2 + 5, addrHeaderY);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      const drawnLines = drawnByAddress.split('\n');
+      drawnLines.forEach((dl, i) => {
+        doc.text(dl, 14, addrHeaderY + 3.5 + (i * 3));
+      });
+
+      if (servedUponAddress.trim()) {
+        const servedLines = servedUponAddress.split('\n');
+        servedLines.forEach((sl, i) => {
+          doc.text(sl, pageWidth / 2 + 5, addrHeaderY + 3.5 + (i * 3));
+        });
+      } else {
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(100);
+        doc.text('[Opponent Advocate details to be endorsed upon service]', pageWidth / 2 + 5, addrHeaderY + 3.5);
+      }
+    }
+
+    return doc;
+  };
+
+  // 1-Click Vector PDF Download
+  const handleDownloadPDF = async () => {
+    setIsExportingPdf(true);
+    triggerToast('loading', docType === 'fee_note' ? 'Generating 1-Page Fee Note PDF...' : 'Generating High Court Bill of Costs PDF...', 0);
+    try {
+      await persistNoteToDatabase('processed');
+      const doc = await generatePdfDocument();
       doc.save(`${documentRef}.pdf`);
-      triggerToast('success', `${docType === 'fee_note' ? 'Fee Note' : 'Bill of Costs'} PDF downloaded successfully!`);
+      triggerToast('success', `${docType === 'fee_note' ? 'Fee Note' : 'Bill of Costs'} PDF downloaded!`);
     } catch (err: any) {
       triggerToast('error', 'Download PDF failed: ' + (err?.message || 'Error occurred'));
     } finally {
       setIsExportingPdf(false);
+    }
+  };
+
+  // 1-Click Email Dispatch (With Real Base64 Attached PDF)
+  const handleEmailClient = async () => {
+    let targetEmail = clientEmail.trim();
+    if (!targetEmail) {
+      const match = availableClients.find(c => c.name.toLowerCase() === clientName.toLowerCase() || c.id === selectedClientId);
+      if (match?.email) targetEmail = match.email;
+    }
+    if (!targetEmail) {
+      setShareMode('email');
+      setShareMenuOpen(true);
+      triggerToast('loading', 'Please confirm client email address below.');
+      return;
+    }
+
+    setIsEmailing(true);
+    triggerToast('loading', `Compiling PDF invoice & dispatching to ${targetEmail}...`, 0);
+
+    try {
+      await persistNoteToDatabase('processed');
+      const doc = await generatePdfDocument();
+      const pdfBase64 = doc.output('datauristring').split(',')[1];
+      const total = result?.grand_total || initialNote?.grandTotal || 0;
+      const docLabel = docType === 'fee_note' ? 'Fee Note' : 'Bill of Costs';
+
+      await sendEmail({
+        to: [targetEmail],
+        subject: `${docLabel} ${documentRef} — ${activeFirm.name}`,
+        category: 'firm_to_client',
+        senderName: activeFirm.name,
+        body: `Dear ${clientName || claimantName || 'Client'},\n\nPlease find attached the official ${docLabel} Ref: ${documentRef} for ${matterTitle || 'Professional Legal Services'}.\n\nINVOICE SUMMARY:\nDocument Reference: ${documentRef}\nDate of Issue: ${formatLegalDate(dateBilled)}\nTotal Due for Remittance: KES ${total.toLocaleString('en-KE', { minimumFractionDigits: 2 })}\n\nSETTLEMENT & REMITTANCE DETAILS:\nBank: ${activeFirm.bankName || 'KCB Bank Kenya'}\nAccount Number: ${activeFirm.bankAccount || '1104889922'}\nBranch: ${activeFirm.bankBranch || 'Riverside'}\nSwift/BIC: ${activeFirm.swiftCode || 'KCBLKENX'}\nM-Pesa Paybill: ${activeFirm.mpesaPaybill || '522522'} (Account Ref: ${documentRef})\n\nYou can also verify and view your official certified document online at:\n${window.location.origin}/?tab=verify&ref=${documentRef}&amt=${total.toFixed(2)}&dt=${dateBilled}&cli=${encodeURIComponent(clientName || claimantName || 'Client')}\n\nThank you for choosing ${activeFirm.name}.\n\nYours faithfully,\n${activeFirm.name}\nAdvocates & Commissioners for Oaths`,
+        attachments: [
+          {
+            filename: `${documentRef}.pdf`,
+            content: pdfBase64,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+
+      triggerToast('success', `${docLabel} PDF with official attachment sent to ${targetEmail}!`);
+    } catch (err: any) {
+      triggerToast('error', `Email dispatch failed: ${err?.message || 'Error occurred'}`);
+    } finally {
+      setIsEmailing(false);
+    }
+  };
+
+  // Real WhatsApp Dispatch (Opens WhatsApp with pre-filled message, portal link & instant PDF download)
+  const handleWhatsAppClient = async () => {
+    let targetPhone = clientPhone.trim();
+    if (!targetPhone) {
+      const match = availableClients.find(c => c.name.toLowerCase() === clientName.toLowerCase() || c.id === selectedClientId);
+      if (match?.phonePrimary || match?.phone) targetPhone = match.phonePrimary || match.phone || '';
+    }
+    const cleanPhone = targetPhone.replace(/[^0-9]/g, '');
+
+    setIsWhatsAppSending(true);
+    triggerToast('loading', 'Preparing invoice & downloading PDF for WhatsApp...', 0);
+
+    try {
+      await persistNoteToDatabase('processed');
+      const doc = await generatePdfDocument();
+      const pdfBlob = doc.output('blob');
+
+      // 1. Download file so lawyer can drag-and-drop or attach to WhatsApp chat
+      doc.save(`${documentRef}.pdf`);
+
+      // 2. Upload to vault or compute portal verification link
+      const portalVerifyLink = `${window.location.origin}/?tab=verify&ref=${documentRef}&amt=${(result?.grand_total || 0).toFixed(2)}&dt=${dateBilled}&cli=${encodeURIComponent(clientName || claimantName || 'Client')}`;
+      let downloadLink = portalVerifyLink;
+
+      try {
+        const vaultUrl = await uploadPdfToVault(documentRef, pdfBlob);
+        if (vaultUrl) downloadLink = vaultUrl;
+      } catch (e) {
+        console.warn('Vault upload notice:', e);
+      }
+
+      const total = result?.grand_total || initialNote?.grandTotal || 0;
+      const docLabel = docType === 'fee_note' ? 'Fee Note' : 'Bill of Costs';
+
+      const executiveMessage = `Dear ${clientName || claimantName || 'Client'}, please find your ${docLabel} ref ${documentRef} for KES ${total.toLocaleString('en-KE', { minimumFractionDigits: 2 })}. You can download and inspect your official certified PDF invoice here: ${downloadLink} . Bank Remittance: ${activeFirm.bankName || 'KCB Bank'} A/C ${activeFirm.bankAccount || '1104889922'} / Paybill ${activeFirm.mpesaPaybill || '522522'}. Thank You, ${activeFirm.name}.`;
+
+      if (cleanPhone) {
+        window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(executiveMessage)}`, '_blank');
+        triggerToast('success', `WhatsApp opened with pre-filled invoice message! PDF downloaded to attach.`);
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(executiveMessage)}`, '_blank');
+        triggerToast('success', `WhatsApp Web opened with invoice text! PDF downloaded to attach.`);
+      }
+    } catch (err: any) {
+      triggerToast('error', `WhatsApp error: ${err?.message || 'Error occurred'}`);
+    } finally {
+      setIsWhatsAppSending(false);
     }
   };
 
@@ -1463,20 +1615,18 @@ ${c.email ? `Email: ${c.email}
 
   const executeShare = () => {
     if (!shareInput.trim()) return;
-    const total = result?.grand_total || initialNote?.grandTotal || 0;
-    const docLabel = docType === 'fee_note' ? 'Fee Note' : 'Bill of Costs';
     if (shareMode === 'whatsapp') {
-      const text = `${docLabel} ${documentRef} for ${clientName || claimantName || 'Client'}. Total Due: KES ${total.toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
-      window.open(`https://wa.me/${shareInput.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
+      setClientPhone(shareInput.trim());
+      handleWhatsAppClient();
     } else if (shareMode === 'email') {
-      const subject = `${docLabel}: ${documentRef}`;
-      const body = `Please find attached the ${docLabel} for: ${matterTitle}.\n\nTotal Due: KES ${total.toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
-      window.open(`mailto:${shareInput}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+      setClientEmail(shareInput.trim());
+      handleEmailClient();
     }
     setShareMenuOpen(false);
     setShareMode('none');
     setShareInput('');
   };
+
 
   return (
     <div className="space-y-4 relative pb-12">
@@ -1489,18 +1639,43 @@ ${c.email ? `Email: ${c.email}
         </div>
       )}
 
-      {/* Top Header - Compact */}
-      <div className="pt-1 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)]/60 pb-3">
+      {/* Top Header - Minimalist */}
+      <div className="pt-0 mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)]/50 pb-2.5">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold font-brand text-[var(--text-main)] tracking-tight">
-            Bill of Costs
+          <h1 className="text-lg sm:text-xl font-bold text-[var(--text-main)] tracking-tight">
+            {docType === 'fee_note' ? 'Fee Note Studio' : 'Court Bill of Costs'}
           </h1>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5 font-sans">
-            Compliant with the Advocates (Remuneration) Order (L.N. 35/45 of 2014)
+          <p className="text-xs text-[var(--text-muted)] mt-0.5">
+            {docType === 'fee_note' ? 'Issue legal fee note' : 'Formal court taxation bill'}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Mode Switcher */}
+          <div className="p-1 rounded-xl bg-slate-100 dark:bg-zinc-800 flex items-center gap-1 border border-[var(--border-color)]">
+            <button
+              type="button"
+              onClick={() => { setDocType('fee_note'); setActiveStep(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                docType === 'fee_note'
+                  ? 'bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+              }`}
+            >
+              Quick Fee Note
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDocType('party_party'); setActiveStep(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                docType !== 'fee_note'
+                  ? 'bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+              }`}
+            >
+              Court Bill of Costs
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => onNavigateToTab ? onNavigateToTab('feenotes') : null}
@@ -1518,35 +1693,39 @@ ${c.email ? `Email: ${c.email}
         {/* LEFT COLUMN: 4-STAGE STEPPER STUDIO (5 OF 12 COLS) */}
         <div className="lg:col-span-5 space-y-6">
           
-          {/* Stepper Navigation Pills */}
-          <div className="bg-[var(--bg-subtle)] p-1.5 rounded-2xl border border-[var(--border-color)] flex items-center justify-between gap-1">
+          {/* Stepper Process: Minimalist Trail (No Background Cards) */}
+          <div className="flex items-center justify-between px-1 py-1 text-xs select-none border-b border-[var(--border-color)]/40 pb-2">
             {[
-              { num: 1, label: docType === 'fee_note' ? 'Client' : 'Parties', desc: docType === 'fee_note' ? 'Billing Info' : 'Case Info' },
-              { num: 2, label: 'Tariff', desc: 'Scale Math' },
-              { num: 3, label: 'Folios', desc: 'Work Items' },
-              { num: 4, label: docType === 'fee_note' ? 'Payment' : 'Endorse', desc: docType === 'fee_note' ? 'Remittance' : 'Sign-off' }
-            ].map(step => (
-              <button
-                key={step.num}
-                type="button"
-                onClick={() => setActiveStep(step.num)}
-                className={`flex-1 py-2 px-2.5 rounded-xl text-left transition-all cursor-pointer ${
-                  activeStep === step.num
-                    ? 'bg-white dark:bg-zinc-900 shadow-sm border border-[var(--border-color)]'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center font-mono ${
+              { num: 1, label: docType === 'fee_note' ? 'Client' : 'Parties' },
+              { num: 2, label: 'Tariff' },
+              { num: 3, label: 'Folios' },
+              { num: 4, label: docType === 'fee_note' ? 'Payment' : 'Endorse' }
+            ].map((step, idx) => (
+              <div key={step.num} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(step.num)}
+                  className={`flex items-center gap-1.5 transition-colors cursor-pointer ${
                     activeStep === step.num
-                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-                      : 'bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400'
+                      ? 'text-slate-900 dark:text-white font-bold'
+                      : activeStep > step.num
+                      ? 'text-emerald-600 dark:text-emerald-400 font-medium'
+                      : 'text-slate-400 dark:text-zinc-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className={`w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-mono ${
+                    activeStep === step.num
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold'
+                      : activeStep > step.num
+                      ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-slate-100 dark:bg-zinc-800 text-slate-400'
                   }`}>
-                    {step.num}
+                    {activeStep > step.num ? '✓' : step.num}
                   </span>
-                  <span className="font-bold text-xs truncate text-[var(--text-main)]">{step.label}</span>
-                </div>
-              </button>
+                  <span className="text-xs">{step.label}</span>
+                </button>
+                {idx < 3 && <span className="text-slate-300 dark:text-zinc-700 text-xs">──</span>}
+              </div>
             ))}
           </div>
 
@@ -1554,50 +1733,31 @@ ${c.email ? `Email: ${c.email}
           {/* STEP 1: CASE & PARTIES DETAILS (ADAPTS TO DOC TYPE) */}
           {/* ================================================================ */}
           {activeStep === 1 && (
-            <div className="vercel-card p-6 space-y-5">
+            <div className="space-y-4 pt-1">
               <div className="border-b border-[var(--border-color)] pb-3">
                 <h3 className="font-bold text-sm text-[var(--text-main)]">
-                  {docType === 'fee_note' ? 'Step 1: Document Type & Client Information' : 'Step 1: Document Type & Court Information'}
+                  {docType === 'fee_note' ? 'Client Details' : 'Court & Parties'}
                 </h3>
-                <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                  {docType === 'fee_note' 
-                    ? 'Select classification and configure client billing details' 
-                    : 'Define court forum, cause title, and party designations'}
-                </p>
               </div>
 
-              {/* Document Classification (Minimalist Selector without Heavy Backgrounds) */}
-              <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-2">Document Classification</label>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {[
-                    { id: 'party_party', title: 'Party & Party', note: 'Opponent court taxation' },
-                    { id: 'advocate_client', title: 'Advocate & Client', note: '+50% statutory uplift' },
-                    { id: 'fee_note', title: 'Fee Note Proforma', note: 'Client direct invoice' },
-                    { id: 'taxation_estimate', title: 'Taxation Estimate', note: 'Cost risk exposure' }
-                  ].map(dt => {
-                    const isSelected = docType === dt.id;
-                    return (
-                      <button
-                        key={dt.id}
-                        type="button"
-                        onClick={() => setDocType(dt.id)}
-                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer bg-transparent ${
-                          isSelected
-                            ? 'border-slate-900 dark:border-white text-[var(--text-main)] ring-1 ring-slate-900 dark:ring-white'
-                            : 'border-slate-200 dark:border-zinc-800 text-[var(--text-muted)] hover:border-slate-400 hover:text-[var(--text-main)]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className={`block text-xs ${isSelected ? 'font-bold text-[var(--text-main)]' : 'font-medium'}`}>{dt.title}</span>
-                          {isSelected && <Check className="w-3.5 h-3.5 text-slate-900 dark:text-white shrink-0" />}
-                        </div>
-                        <span className={`text-[10px] block mt-0.5 ${isSelected ? 'text-[var(--text-muted)] font-medium' : 'text-slate-400 dark:text-zinc-500'}`}>{dt.note}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+              {/* Classification 1-Line Dropdown */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[var(--text-muted)]">
+                  Classification
+                </label>
+                <select
+                  value={docType}
+                  onChange={(e) => setDocType(e.target.value)}
+                  className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs font-semibold text-[var(--text-main)] focus:outline-none focus:border-slate-500 cursor-pointer"
+                >
+                  <option value="fee_note">Fee Note Proforma (Direct Client Invoice)</option>
+                  <option value="party_party">Party & Party (Opponent Court Taxation)</option>
+                  <option value="advocate_client">Advocate & Client (+50% Statutory Uplift)</option>
+                  <option value="taxation_estimate">Taxation Estimate (Cost Risk Exposure)</option>
+                </select>
               </div>
+
+
 
               {/* ZERO-SETUP AUTO-SYNC (COMMENTED OUT AS PER FIRM WORKFLOW REQUIREMENT) */}
               {false && (
@@ -1705,7 +1865,7 @@ ${c.email ? `Email: ${c.email}
                       type="text"
                       value={clientName}
                       onChange={e => setClientName(e.target.value)}
-                      placeholder="e.g. Safaricom PLC / Nairobi County / John Doe"
+                      placeholder=""
                       className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs font-semibold text-[var(--text-main)] focus:outline-none focus:border-slate-500 font-sans"
                     />
                   </div>
@@ -1718,7 +1878,7 @@ ${c.email ? `Email: ${c.email}
                       rows={3}
                       value={clientAddress}
                       onChange={e => setClientAddress(e.target.value)}
-                      placeholder="e.g. Safaricom House, HQ2\nWaiyaki Way, Westlands\nP.O. Box 66827-00800, Nairobi"
+                      placeholder=""
                       className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-slate-500 font-sans"
                     />
                   </div>
@@ -1731,7 +1891,7 @@ ${c.email ? `Email: ${c.email}
                       type="text"
                       value={matterTitle}
                       onChange={e => setMatterTitle(e.target.value)}
-                      placeholder="Enter transaction or matter description..."
+                      placeholder=""
                       className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-slate-500 font-sans"
                     />
                   </div>
@@ -1753,7 +1913,7 @@ ${c.email ? `Email: ${c.email}
                           type="text"
                           value={forumName}
                           onChange={e => setForumName(e.target.value)}
-                          placeholder="Enter court / forum reference (optional)..."
+                          placeholder=""
                           className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none"
                         />
                       </div>
@@ -1772,7 +1932,7 @@ ${c.email ? `Email: ${c.email}
                       rows={2}
                       value={forumName}
                       onChange={e => setForumName(e.target.value)}
-                      placeholder="Enter Court / Forum Jurisdiction (e.g. In the High Court of Kenya at Nairobi)..."
+                      placeholder=""
                       className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-slate-500 font-sans"
                     />
                   </div>
@@ -1786,7 +1946,7 @@ ${c.email ? `Email: ${c.email}
                       type="text"
                       value={matterTitle}
                       onChange={e => setMatterTitle(e.target.value)}
-                      placeholder="Enter Cause Title / Suit Reference (e.g. Civil Suit No. ...)..."
+                      placeholder=""
                       className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-slate-500 font-sans"
                     />
                   </div>
@@ -1801,7 +1961,7 @@ ${c.email ? `Email: ${c.email}
                         type="text"
                         value={claimantName}
                         onChange={e => setClaimantName(e.target.value)}
-                        placeholder={docType === 'advocate_client' ? EXACT_FIRM_INFO.name : 'Enter Claimant / Plaintiff name...'}
+                        placeholder=""
                         className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none font-sans"
                       />
                     </div>
@@ -1813,7 +1973,7 @@ ${c.email ? `Email: ${c.email}
                         type="text"
                         value={respondentName}
                         onChange={e => setRespondentName(e.target.value)}
-                        placeholder="Enter Respondent / Defendant name..."
+                        placeholder=""
                         className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none font-sans"
                       />
                     </div>
@@ -1827,7 +1987,7 @@ ${c.email ? `Email: ${c.email}
                         type="text"
                         value={judgeName}
                         onChange={e => setJudgeName(e.target.value)}
-                        placeholder="Please input Judge / Coram name (optional)..."
+                        placeholder=""
                         className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none font-sans"
                       />
                     </div>
@@ -1874,10 +2034,10 @@ ${c.email ? `Email: ${c.email}
           {/* STEP 2: STATUTORY TARIFF & INSTRUCTION FEE MATH */}
           {/* ================================================================ */}
           {activeStep === 2 && (
-            <div className="vercel-card p-6 space-y-5">
+            <div className="space-y-4 pt-1">
               <div className="border-b border-[var(--border-color)] pb-3">
-                <h3 className="font-bold text-sm text-[var(--text-main)]">Step 2: Statutory Remuneration Scale & Calculation</h3>
-                <p className="text-xs text-[var(--text-muted)] mt-0.5">Select the official schedule and quantify subject matter value</p>
+                <h3 className="font-bold text-sm text-[var(--text-main)]">Fees & Remuneration Scale</h3>
+                
               </div>
 
               {/* Schedule Dropdown */}
@@ -1895,11 +2055,7 @@ ${c.email ? `Email: ${c.email}
                     <option key={s.id} value={s.id}>{s.label}</option>
                   ))}
                 </select>
-                {!courtSchedule && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium mt-1.5">
-                    Please pick a statutory schedule in the dropdown; the rest follows.
-                  </p>
-                )}
+
               </div>
 
               {/* Claim Value & Quick Chips */}
@@ -1914,7 +2070,7 @@ ${c.email ? `Email: ${c.email}
                     type="number"
                     value={claimValue === '' ? '' : claimValue}
                     onChange={e => setClaimValue(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                    placeholder="0.00"
+                    placeholder=""
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl pl-12 pr-3 py-2 text-sm font-mono font-bold text-[var(--text-main)] focus:outline-none"
                   />
                 </div>
@@ -1964,7 +2120,7 @@ ${c.email ? `Email: ${c.email}
                   <div className="pt-2 space-y-1">
                     <input
                       type="number"
-                      placeholder="Enter agreed instruction fee in KES..."
+                      placeholder=""
                       value={customInstructionFee === '' ? '' : customInstructionFee}
                       onChange={e => setCustomInstructionFee(e.target.value === '' ? '' : parseFloat(e.target.value))}
                       className="w-full bg-white dark:bg-zinc-800 border border-blue-400 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-[var(--text-main)] focus:outline-none"
@@ -2074,10 +2230,10 @@ ${c.email ? `Email: ${c.email}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveStep(3)}
+                  onClick={() => setActiveStep(docType === 'fee_note' ? 4 : 3)}
                   className="px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-black dark:hover:bg-slate-100 transition-colors cursor-pointer"
                 >
-                  <span>Continue to Folios & Disbursements</span>
+                  <span>{docType === 'fee_note' ? 'Continue to Remittance & Review' : 'Continue to Folios & Disbursements'}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -2184,14 +2340,14 @@ ${c.email ? `Email: ${c.email}
                 <form onSubmit={handleCreateNewItem} className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Describe custom work..."
+                    placeholder=""
                     value={newItemDesc}
                     onChange={e => setNewItemDesc(e.target.value)}
                     className="flex-1 bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none"
                   />
                   <input
                     type="number"
-                    placeholder="KES"
+                    placeholder=""
                     value={newItemVal}
                     onChange={e => setNewItemVal(e.target.value === '' ? '' : parseFloat(e.target.value))}
                     className="w-24 bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-right text-[var(--text-main)] focus:outline-none"
@@ -2297,14 +2453,14 @@ ${c.email ? `Email: ${c.email}
                 <form onSubmit={handleCreateNewExp} className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Describe disbursement..."
+                    placeholder=""
                     value={newExpDesc}
                     onChange={e => setNewExpDesc(e.target.value)}
                     className="flex-1 bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none"
                   />
                   <input
                     type="number"
-                    placeholder="KES"
+                    placeholder=""
                     value={newExpVal}
                     onChange={e => setNewExpVal(e.target.value === '' ? '' : parseFloat(e.target.value))}
                     className="w-24 bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-right text-[var(--text-main)] focus:outline-none"
@@ -2343,7 +2499,7 @@ ${c.email ? `Email: ${c.email}
           {/* STEP 4: ENDORSEMENT OR PAYMENT TERMS (ADAPTS TO DOCTYPE) */}
           {/* ================================================================ */}
           {activeStep === 4 && (
-            <div className="vercel-card p-6 space-y-5">
+            <div className="space-y-4 pt-1">
               <div className="border-b border-[var(--border-color)] pb-3">
                 <h3 className="font-bold text-sm text-[var(--text-main)]">
                   {docType === 'fee_note' ? 'Step 4: Bank Remittance Details & Terms' : 'Step 4: Statutory Endorsements & Service Blocks'}
@@ -2396,7 +2552,7 @@ ${c.email ? `Email: ${c.email}
                       type="text"
                       value={clientName}
                       onChange={e => setClientName(e.target.value)}
-                      placeholder="Defaults to Claimant Name if blank"
+                      placeholder=""
                       className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none"
                     />
                   </div>
@@ -2417,7 +2573,7 @@ ${c.email ? `Email: ${c.email}
                       rows={4}
                       value={servedUponAddress}
                       onChange={e => setServedUponAddress(e.target.value)}
-                      placeholder="Leave blank until served, or enter Opponent Advocate Firm Name, Physical Building & Address..."
+                      placeholder=""
                       className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs font-mono text-[var(--text-main)] focus:outline-none"
                     />
                   </div>
@@ -2447,7 +2603,7 @@ ${c.email ? `Email: ${c.email}
               <div className="flex justify-between items-center pt-2">
                 <button
                   type="button"
-                  onClick={() => setActiveStep(3)}
+                  onClick={() => setActiveStep(docType === 'fee_note' ? 2 : 3)}
                   className="px-3.5 py-1.5 text-xs font-semibold rounded-xl text-[var(--text-muted)] hover:text-[var(--text-main)] flex items-center gap-1 cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
@@ -2481,607 +2637,801 @@ ${c.email ? `Email: ${c.email}
         {/* ================================================================ */}
         <div className="lg:col-span-7 space-y-4 lg:sticky lg:top-4">
           
-          {/* Top Real-Time Action Bar */}
-          <div className="bg-white dark:bg-zinc-900 border border-[var(--border-color)] rounded-2xl p-3 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-            {/* Live Financial Pill & Stamp Trigger Button */}
-            <div className="flex items-center gap-2.5">
-              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 font-sans">Total Due:</span>
-              <span className="text-base font-extrabold font-mono text-[var(--text-main)]">
-                KES {(result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-              </span>
+          {/* Top Real-Time Minimalist Action Bar */}
+          <div className="bg-white dark:bg-zinc-900 border border-[var(--border-color)] rounded-2xl p-2.5 shadow-sm flex flex-wrap items-center justify-between gap-2.5">
+            {/* Minimalist Modern Checkbox: PDF Preview */}
+            <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-[var(--text-main)] px-1">
+              <input
+                type="checkbox"
+                checked={showPdfPreview}
+                onChange={(e) => setShowPdfPreview(e.target.checked)}
+                className="w-4 h-4 rounded text-slate-900 focus:ring-0 cursor-pointer"
+              />
+              <span>PDF Preview</span>
+            </label>
 
-              {/* Stamp Trigger Button */}
+            {/* Flat Working Action Buttons */}
+            <div className="flex items-center gap-1.5">
+              {/* Stamp Button */}
               <button
                 type="button"
                 onClick={() => setStampModalOpen(true)}
-                className="ml-1 px-2.5 py-1 rounded-xl text-xs font-semibold border border-[var(--border-color)] bg-[var(--bg-subtle)] text-[var(--text-main)] hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[var(--border-color)] text-[var(--text-main)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer flex items-center gap-1.5"
                 title="View & customize official stamp"
               >
-                <Stamp className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                <Stamp className="w-3.5 h-3.5" />
                 <span>Stamp</span>
               </button>
-            </div>
 
-            {/* Exactly 2 Primary Action Buttons + Print & Share */}
-            <div className="flex items-center gap-2">
+              {/* Save Draft Button */}
               <button
                 type="button"
                 onClick={handleSaveDraft}
                 disabled={isSaving}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold border border-[var(--border-color)] bg-[var(--bg-subtle)] text-[var(--text-main)] hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-1"
-                title="Save draft bill"
+                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[var(--border-color)] text-[var(--text-main)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                title="Save draft to database"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>{isSaving ? 'Saving...' : 'Save Draft'}</span>
               </button>
 
-              <button
-                type="button"
-                onClick={handleDownloadExcel}
-                disabled={isExportingExcel}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                title="Export Rule 69 5-Column Excel Spreadsheet"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>{isExportingExcel ? 'Exporting...' : 'Export Excel'}</span>
-              </button>
+              {/* Share Dropdown Button */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareMenuOpen(!shareMenuOpen);
+                    setExportMenuOpen(false);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[var(--border-color)] text-[var(--text-main)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share</span>
+                  <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" />
+                </button>
+                {shareMenuOpen && (
+                  <div className="absolute right-0 mt-1.5 w-48 bg-white dark:bg-zinc-900 border border-[var(--border-color)] rounded-xl shadow-xl z-50 p-1.5 text-xs animate-in fade-in duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShareMenuOpen(false);
+                        handleEmailClient();
+                      }}
+                      disabled={isEmailing}
+                      className="w-full flex items-center gap-2 p-2 hover:bg-[var(--bg-subtle)] rounded-lg text-left font-medium text-[var(--text-main)] transition-colors cursor-pointer"
+                    >
+                      <Mail className="w-3.5 h-3.5 text-blue-500" />
+                      <span>{isEmailing ? 'Sending...' : 'Email'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShareMenuOpen(false);
+                        handleWhatsAppClient();
+                      }}
+                      disabled={isWhatsAppSending}
+                      className="w-full flex items-center gap-2 p-2 hover:bg-[var(--bg-subtle)] rounded-lg text-left font-medium text-[var(--text-main)] transition-colors cursor-pointer"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>{isWhatsAppSending ? 'Preparing...' : 'WhatsApp'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
 
+              {/* Export Dropdown Button */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportMenuOpen(!exportMenuOpen);
+                    setShareMenuOpen(false);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[var(--border-color)] text-[var(--text-main)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export</span>
+                  <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" />
+                </button>
+                {exportMenuOpen && (
+                  <div className="absolute right-0 mt-1.5 w-44 bg-white dark:bg-zinc-900 border border-[var(--border-color)] rounded-xl shadow-xl z-50 p-1.5 text-xs animate-in fade-in duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExportMenuOpen(false);
+                        handleDownloadPDF();
+                      }}
+                      disabled={isExportingPdf}
+                      className="w-full flex items-center gap-2 p-2 hover:bg-[var(--bg-subtle)] rounded-lg text-left font-medium text-[var(--text-main)] transition-colors cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-red-500" />
+                      <span>As PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExportMenuOpen(false);
+                        handleDownloadExcel();
+                      }}
+                      disabled={isExportingExcel}
+                      className="w-full flex items-center gap-2 p-2 hover:bg-[var(--bg-subtle)] rounded-lg text-left font-medium text-[var(--text-main)] transition-colors cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>As Excel</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Download Icon */}
               <button
                 type="button"
                 onClick={handleDownloadPDF}
                 disabled={isExportingPdf}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                title="Download Vector PDF"
+                className="p-1.5 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer disabled:opacity-50"
+                title="Download PDF"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>{isExportingPdf ? 'Exporting...' : 'Download PDF'}</span>
+                <Download className="w-4 h-4" />
               </button>
 
+              {/* Quick Print Icon */}
               <button
                 type="button"
                 onClick={handlePrintPDF}
-                className="p-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors cursor-pointer"
+                className="p-1.5 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer"
                 title="Print Document"
               >
                 <Printer className="w-4 h-4" />
               </button>
-
-              {/* Share Dropdown */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShareMenuOpen(!shareMenuOpen)}
-                  className="p-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors cursor-pointer"
-                  title="Share Bill"
-                >
-                  <Share2 className="w-4 h-4" />
-                </button>
-
-                {shareMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-zinc-900 border border-[var(--border-color)] rounded-xl shadow-2xl z-50 p-2 text-xs">
-                    {shareMode === 'none' ? (
-                      <div className="space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => setShareMode('email')}
-                          className="w-full flex items-center justify-between p-2 hover:bg-[var(--bg-subtle)] rounded-lg text-left font-medium"
-                        >
-                          <div className="flex items-center gap-2"><Mail className="w-3.5 h-3.5 text-blue-500" /> Share via Email</div>
-                          <ChevronRight className="w-3 h-3 text-slate-400" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShareMode('whatsapp')}
-                          className="w-full flex items-center justify-between p-2 hover:bg-[var(--bg-subtle)] rounded-lg text-left font-medium"
-                        >
-                          <div className="flex items-center gap-2"><MessageCircle className="w-3.5 h-3.5 text-emerald-500" /> Share via WhatsApp</div>
-                          <ChevronRight className="w-3 h-3 text-slate-400" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                          <span>{shareMode === 'email' ? 'Email Address' : 'WhatsApp Phone'}</span>
-                          <button onClick={() => setShareMode('none')} className="text-slate-400 hover:text-black">Cancel</button>
-                        </div>
-                        <input
-                          type={shareMode === 'email' ? 'email' : 'tel'}
-                          placeholder={shareMode === 'email' ? 'advocate@firm.co.ke' : '+254700000000'}
-                          value={shareInput}
-                          onChange={e => setShareInput(e.target.value)}
-                          className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-lg px-2.5 py-1 text-xs focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={executeShare}
-                          className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-1.5 rounded-lg text-xs font-bold"
-                        >
-                          Send
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
 
-          {/* THE LIVE A4 COURT DOCUMENT (WYSIWYG - ADAPTS TO DOCTYPE) */}
-          <div className="border border-slate-300 dark:border-zinc-800 rounded-xl bg-slate-100 dark:bg-zinc-950 p-2 sm:p-4 max-h-[820px] overflow-y-auto shadow-inner">
-            <div
-              id="live-a4-document"
-              className="bg-white text-black p-8 sm:p-10 shadow-lg rounded-sm text-[11px] font-sans leading-normal mx-auto max-w-[210mm] min-h-[297mm] space-y-5"
-            >
-              {/* Executive Firm Letterhead */}
-              <div className="flex justify-between items-start border-b-2 border-black pb-4">
-                <div className="space-y-1">
-                  <h1 className="font-bold text-base uppercase tracking-tight text-black font-brand">
-                    {EXACT_FIRM_INFO.name}
-                  </h1>
-                  <span className="text-[8.5px] font-bold text-gray-700 block uppercase tracking-widest font-brand">
-                    ADVOCATES OF THE HIGH COURT OF KENYA
-                  </span>
+          {/* DYNAMIC PREVIEW: INLINE STRUCTURED SUMMARY OR FULL LIVE A4 DOCUMENT */}
+          {!showPdfPreview ? (
+            /* ======================================================== */
+            /* INLINE STRUCTURED SUMMARY VIEW (NO A4 LETTERHEAD)        */
+            /* ======================================================== */
+            <div className="bg-white dark:bg-zinc-900 border border-[var(--border-color)] rounded-2xl p-5 space-y-4 shadow-sm">
+              <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-muted)] block">Inline Summary</span>
+                  <h3 className="font-bold text-sm text-[var(--text-main)]">{docType === 'fee_note' ? 'Professional Fee Note' : getDocumentTitle()}</h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">{matterTitle || 'Professional Legal Services'}</p>
                 </div>
-                <div className="text-right text-[9.5px] leading-tight text-gray-800 font-sans space-y-0.5">
-                  <p>{EXACT_FIRM_INFO.address}</p>
-                  <p>{EXACT_FIRM_INFO.poBox}</p>
-                  <p>{EXACT_FIRM_INFO.phone} | {EXACT_FIRM_INFO.email}</p>
+                <div className="text-right font-mono text-xs">
+                  <p className="font-bold text-[var(--text-main)]">Ref: {documentRef}</p>
+                  <p className="text-[var(--text-muted)]">{formatLegalDate(dateBilled)}</p>
                 </div>
               </div>
 
-              {/* DYNAMIC DOCUMENT BODY BASED ON DOCTYPE */}
-              {docType === 'fee_note' ? (
-                /* ======================================================== */
-                /* FEE NOTE PROFORMA LIVE A4 PRESENTATION (CLIENT INVOICE) */
-                /* ======================================================== */
-                <div className="space-y-5">
-                  {/* Fee Note Title & Metadata Block */}
-                  <div className="flex justify-between items-start border-b border-black pb-3">
-                    <div className="space-y-1 max-w-[60%]">
-                      <span className="font-bold text-[8.5px] uppercase tracking-wider text-gray-600 block">BILLED TO / INSTRUCTING CLIENT:</span>
-                      <h2 className="font-bold text-sm uppercase text-black">{clientName.trim() || claimantName.trim() || '[CLIENT NAME]'}</h2>
-                      <p className="whitespace-pre-line text-[9.5px] text-gray-700 leading-snug">{clientAddress}</p>
-                    </div>
-                    <div className="text-right font-mono text-[9.5px] space-y-0.5">
-                      <p><strong className="font-sans font-bold">FEE NOTE NO:</strong> {documentRef}</p>
-                      <p><strong className="font-sans font-bold">DATE:</strong> {formatLegalDate(dateBilled)}</p>
-                      <p><strong className="font-sans font-bold">KRA PIN:</strong> {EXACT_FIRM_INFO.kraPin || 'P051123456Z'}</p>
-                      <p><strong className="font-sans font-bold">VAT REG:</strong> {(EXACT_FIRM_INFO as any).vatNumber || 'VAT-0192834-K'}</p>
-                    </div>
-                  </div>
+              <div className="text-xs grid grid-cols-1 sm:grid-cols-2 gap-3 border-b border-[var(--border-color)] pb-3">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] block">Client / Instructing Party:</span>
+                  <p className="font-semibold text-[var(--text-main)]">{clientName.trim() || claimantName.trim() || 'Client'}</p>
+                  <p className="text-[var(--text-muted)] whitespace-pre-line text-[11px] mt-0.5">{clientAddress}</p>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] block">Law Firm:</span>
+                  <p className="font-semibold text-[var(--text-main)]">{activeFirm.name}</p>
+                  <p className="text-[var(--text-muted)] text-[11px]">{activeFirm.address} &bull; LSK Roll: ADMIN/2026/001</p>
+                </div>
+              </div>
 
-                  {/* Document Title Banner */}
-                  <div className="p-2 text-center border-y-2 border-black bg-slate-50">
-                    <h3 className="font-bold text-xs uppercase tracking-wider">PROFESSIONAL FEE NOTE</h3>
-                    <p className="text-[9px] text-gray-700 italic mt-0.5">{getDocumentSubtitle()}</p>
-                  </div>
-
-                  {/* Subject Matter Line */}
-                  <div className="bg-slate-100 p-2 border border-black text-[10px]">
-                    <span className="font-bold uppercase tracking-wider text-[8.5px] text-gray-700 block">SUBJECT MATTER / TRANSACTION:</span>
-                    <p className="font-bold uppercase text-black mt-0.5">{matterTitle || 'Professional Legal Services Rendered'}</p>
-                    {isLinkedCourtMatter && forumName && (
-                      <p className="text-[9px] text-gray-600 mt-0.5 font-mono">Forum: {forumName}</p>
-                    )}
-                  </div>
-
-                  {/* 4-Column Professional Fee Note Table */}
-                  <table className="w-full text-left border-collapse border border-black text-[10px]">
-                    <thead>
-                      <tr className="border-b border-black font-bold uppercase text-[9px] bg-slate-50">
-                        <th className="p-2 border-r border-black w-10 text-center">#</th>
-                        <th className="p-2 border-r border-black">PARTICULARS OF LEGAL SERVICES</th>
-                        <th className="p-2 border-r border-black w-36">STATUTORY BASIS</th>
-                        <th className="p-2 text-right w-28">AMOUNT (KES)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-black">
-                      <tr className="bg-slate-100 font-bold border-b border-black">
-                        <td colSpan={4} className="p-1 text-center uppercase tracking-wider text-[9px]">
-                          SECTION A: PROFESSIONAL LEGAL FEES (PROFIT COSTS)
-                        </td>
-                      </tr>
-                      {/* Item 1: Instruction Fee */}
-                      <tr>
-                        <td className="p-2 border-r border-black text-center font-bold">1</td>
-                        <td className="p-2 border-r border-black leading-snug">
-                          <strong className="block font-bold">
-                            {isCustomInstruction ? 'Instruction Fees (Agreed Retainer per Section 45)' : 'Professional Instruction Fees'}
-                          </strong>
-                          <span className="text-gray-700 text-[9.5px]">
-                            {Number(claimValue) > 0
-                              ? `Assessed ad valorem based on subject transaction value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}.`
-                              : 'Professional legal advisory and representation fee.'}
+              {/* Summary Line Items Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-[var(--border-color)] text-[10px] font-mono uppercase text-[var(--text-muted)]">
+                    <tr>
+                      <th className="py-2 pr-2">#</th>
+                      <th className="py-2 pr-4">Particulars</th>
+                      <th className="py-2 pr-4">Statutory Basis</th>
+                      <th className="py-2 text-right">Amount (KES)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-color)]">
+                    <tr>
+                      <td className="py-2 pr-2 font-mono text-[var(--text-muted)]">1</td>
+                      <td className="py-2 pr-4">
+                        <span className="font-semibold text-[var(--text-main)]">
+                          {isCustomInstruction ? 'Instruction Fee (Agreed Retainer - Sec 45)' : 'Professional Instruction Fees'}
+                        </span>
+                        {Number(claimValue) > 0 && (
+                          <span className="block text-[11px] text-[var(--text-muted)] font-mono">
+                            Ad valorem value: KES {Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                           </span>
-                        </td>
-                        <td className="p-2 border-r border-black text-[9px] font-mono text-gray-700">
-                          {STATUTORY_SCHEDULES.find(s => s.id === courtSchedule)?.category || 'Statutory Order'}
-                        </td>
-                        <td className="p-2 text-right font-mono font-bold">
-                          {(result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                        )}
+                      </td>
+                      <td className="py-2 pr-4 text-[11px] font-mono text-[var(--text-muted)]">
+                        {STATUTORY_SCHEDULES.find(s => s.id === courtSchedule)?.category || 'Statutory Scale'}
+                      </td>
+                      <td className="py-2 text-right font-mono font-semibold text-[var(--text-main)]">
+                        {(result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+
+                    {(result?.getting_up_fee || 0) > 0 && (
+                      <tr>
+                        <td className="py-2 pr-2 font-mono text-[var(--text-muted)]">2</td>
+                        <td className="py-2 pr-4 font-semibold text-[var(--text-main)]">Getting-Up Fee for Trial (Sched. 6 Item 2)</td>
+                        <td className="py-2 pr-4 text-[11px] font-mono text-[var(--text-muted)]">1/3 Instruction Fee</td>
+                        <td className="py-2 text-right font-mono font-semibold text-[var(--text-main)]">
+                          {(result?.getting_up_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                         </td>
                       </tr>
+                    )}
 
-                      {/* Line Items */}
-                      {items.map((it, i) => (
-                        <tr key={i}>
-                          <td className="p-2 border-r border-black text-center font-bold">{i + 2}</td>
-                          <td className="p-2 border-r border-black">{it.description}</td>
-                          <td className="p-2 border-r border-black text-[9px] text-gray-600 font-mono">Professional Attendances</td>
-                          <td className="p-2 text-right font-mono">
-                            {(it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                    {items.map((it, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2 pr-2 font-mono text-[var(--text-muted)]">{idx + ((result?.getting_up_fee || 0) > 0 ? 3 : 2)}</td>
+                        <td className="py-2 pr-4 text-[var(--text-main)]">{it.description}</td>
+                        <td className="py-2 pr-4 text-[11px] font-mono text-[var(--text-muted)]">Professional Attendance</td>
+                        <td className="py-2 text-right font-mono text-[var(--text-main)]">
+                          {(it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+
+                    <tr className="font-bold border-t border-[var(--border-color)]">
+                      <td colSpan={3} className="py-2 pr-4 text-right uppercase text-[11px] text-[var(--text-muted)]">Subtotal Professional Fees:</td>
+                      <td className="py-2 text-right font-mono text-[var(--text-main)]">
+                        {(result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td colSpan={3} className="py-1.5 pr-4 text-right uppercase text-[11px] text-[var(--text-muted)]">
+                        {applyVat ? '16% VAT (Profit Costs):' : 'VAT (Exempt):'}
+                      </td>
+                      <td className="py-1.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                        {(applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+
+                    {extraExpenses.length > 0 && (
+                      <>
+                        {extraExpenses.map((exp, idx) => (
+                          <tr key={`exp-${idx}`}>
+                            <td className="py-1.5 pr-2 font-mono text-[var(--text-muted)]">D{idx + 1}</td>
+                            <td className="py-1.5 pr-4 text-[var(--text-main)]">{exp.description}</td>
+                            <td className="py-1.5 pr-4 text-[11px] font-mono text-[var(--text-muted)]">Pass-Through Disbursement</td>
+                            <td className="py-1.5 text-right font-mono text-[var(--text-main)]">
+                              {exp.unitRate.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="font-bold border-t border-[var(--border-color)]">
+                          <td colSpan={3} className="py-1.5 pr-4 text-right uppercase text-[11px] text-[var(--text-muted)]">Total Disbursements:</td>
+                          <td className="py-1.5 text-right font-mono text-[var(--text-main)]">
+                            {(result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                           </td>
                         </tr>
-                      ))}
+                      </>
+                    )}
 
-                      {/* Subtotal Profit Costs */}
-                      <tr className="font-bold border-t-2 border-black bg-slate-50">
-                        <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Subtotal Professional Legal Fees:</td>
-                        <td className="p-2 text-right font-mono font-bold">
-                          {(result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
+                    <tr className="font-bold border-t-2 border-[var(--border-color)] text-sm">
+                      <td colSpan={3} className="py-2.5 pr-4 text-right uppercase tracking-wider text-[var(--text-main)]">Total Amount Due:</td>
+                      <td className="py-2.5 text-right font-mono font-extrabold text-[var(--text-main)]">
+                        KES {(result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
 
-                      {/* VAT */}
-                      <tr className="font-semibold border-t border-black bg-white">
-                        <td colSpan={3} className="p-2 text-right uppercase text-[9px]">
-                          {applyVat ? 'VAT (16% on Professional Fees — VAT Act 2013):' : 'VAT (16% — Exempt):'}
-                        </td>
-                        <td className="p-2 text-right font-mono font-bold text-emerald-800">
-                          {(applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
+              {/* Payment Information */}
+              <div className="border border-[var(--border-color)] rounded-xl p-3 bg-[var(--bg-subtle)] text-xs space-y-1.5">
+                <span className="font-bold uppercase tracking-wider text-[10px] text-[var(--text-muted)] block">Payment Information</span>
+                <p className="text-[var(--text-main)]">
+                  <strong>Bank:</strong> {activeFirm.bankName || 'KCB Bank Kenya'} &bull; <strong>Branch:</strong> {activeFirm.bankBranch || 'Riverside'} &bull; <strong>A/C No:</strong> {activeFirm.bankAccount || '1104889922'} &bull; <strong>Swift:</strong> {activeFirm.swiftCode || 'KCBLKENX'}
+                </p>
+                <p className="text-[var(--text-main)]">
+                  <strong>M-Pesa Paybill:</strong> {activeFirm.mpesaPaybill || '522522'} &bull; <strong>Account Ref:</strong> {documentRef}
+                </p>
+              </div>
 
-                      {/* Section B: Disbursements */}
-                      {extraExpenses.length > 0 && (
-                        <>
-                          <tr className="bg-slate-100 font-bold border-t-2 border-black">
-                            <td colSpan={4} className="p-1 text-center uppercase tracking-wider text-[9px]">
-                              SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)
-                            </td>
-                          </tr>
-                          {extraExpenses.map((exp, i) => (
-                            <tr key={`exp-${i}`}>
-                              <td className="p-2 border-r border-black text-center font-bold font-mono">D{i + 1}</td>
-                              <td className="p-2 border-r border-black">{exp.description}</td>
-                              <td className="p-2 border-r border-black text-[9px] text-gray-600 font-mono">Receipt Attached</td>
-                              <td className="p-2 text-right font-mono font-bold text-emerald-900">
-                                {exp.unitRate.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-                          ))}
-                          <tr className="font-bold border-t border-black bg-slate-50">
-                            <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Total Out-of-Pocket Disbursements:</td>
-                            <td className="p-2 text-right font-mono font-bold">
-                              {(result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                            </td>
-                          </tr>
-                        </>
-                      )}
-
-                      {/* Grand Total */}
-                      <tr className="font-bold border-t-2 border-black bg-slate-900 text-white">
-                        <td colSpan={3} className="p-2.5 text-right uppercase tracking-wider text-[10px]">TOTAL AMOUNT DUE FOR REMITTANCE (KES):</td>
-                        <td className="p-2.5 text-right font-mono font-extrabold text-xs text-white">
-                          {(result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  {/* Payment & Remittance Box */}
-                  <div className="border border-black p-3 bg-slate-50 space-y-2 text-[9.5px]">
-                    <p className="font-bold uppercase tracking-wider text-[9px]">PAYMENT & REMITTANCE INSTRUCTIONS:</p>
-                    <p><strong className="font-bold">Bank Details:</strong> {bankDetailsText}</p>
-                    <p className="whitespace-pre-line text-gray-700">{paymentTermsText}</p>
+              <div className="text-[11px] text-[var(--text-muted)] italic text-center pt-1">
+                Inline summary mode active. Toggle &ldquo;PDF Preview&rdquo; above to inspect the printable A4 letterhead.
+              </div>
+            </div>
+          ) : (
+            /* ======================================================== */
+            /* THE LIVE A4 COURT DOCUMENT (WYSIWYG - NO BACKGROUND COLORS) */
+            /* ======================================================== */
+            <div className="border border-slate-300 dark:border-zinc-800 rounded-xl bg-slate-100 dark:bg-zinc-950 p-2 sm:p-4 max-h-[820px] overflow-y-auto shadow-inner">
+              <div
+                id="live-a4-document"
+                className="bg-white text-black p-8 sm:p-10 shadow-lg rounded-sm text-[11px] font-sans leading-normal mx-auto max-w-[210mm] min-h-[297mm] space-y-5"
+              >
+                {/* Executive Firm Letterhead with Real Transparent Crest */}
+                <div className="flex justify-between items-start border-b-2 border-black pb-3">
+                  <div className="flex items-center gap-3">
+                    {activeFirm.logoUrl && (
+                      <img
+                        src={activeFirm.logoUrl}
+                        alt="Firm Crest"
+                        className="w-12 h-12 object-contain shrink-0"
+                      />
+                    )}
+                    <div className="space-y-0.5">
+                      <h1 className="font-bold text-base uppercase tracking-tight text-black font-brand">
+                        {activeFirm.name}
+                      </h1>
+                      <span className="text-[8.5px] font-bold text-gray-700 block uppercase tracking-widest font-brand">
+                        ADVOCATES OF THE HIGH COURT OF KENYA
+                      </span>
+                      <span className="text-[8px] text-gray-500 font-mono block">
+                        LSK Reg: ADMIN/2026/001 &bull; KRA PIN: {activeFirm.kraPin || 'P051123456Z'}
+                      </span>
+                    </div>
                   </div>
-
-                  {/* Sign-off (Bottom of document with ample spacing) */}
-                  <div className="pt-16 space-y-8 text-[10px] font-sans">
-                    <div className="flex justify-between items-end border-t border-black pt-2">
-                      <div>
-                        <strong>DATED</strong> at <strong>NAIROBI</strong> this <strong>{formatLegalDate(dateBilled)}</strong>
-                      </div>
-                      <div className="text-right text-[9px] text-gray-600 font-mono">
-                        Reference: <strong>{documentRef}</strong>
-                      </div>
-                    </div>
-
-                    {/* Centered Stamp & Sign-off Block */}
-                    <div className="relative text-center pt-2">
-                      {/* Stamp: QR hidden underneath, real stamp PNG on top */}
-                      {stampOfficial && (
-                        <div className="relative mx-auto mb-[-28px] w-32 h-32 select-none pointer-events-none">
-                          {/* Hidden micro-QR sits dead center, stamp PNG covers it */}
-                          {securityRecord?.qrCodeDataUrl && (
-                            <img
-                              src={securityRecord.qrCodeDataUrl}
-                              alt=""
-                              aria-hidden="true"
-                              className="absolute inset-0 m-auto w-12 h-12 opacity-[0.18]"
-                            />
-                          )}
-                          {/* Real firm stamp PNG on top */}
-                          <img
-                            src={stampImageUrl}
-                            alt="Official Firm Stamp"
-                            className="absolute inset-0 w-full h-full object-contain"
-                          />
-                        </div>
-                      )}
-
-                      <div className="border-b border-black w-64 mx-auto mb-1.5"></div>
-                      <p className="font-bold uppercase font-brand text-[11px]">{EXACT_FIRM_INFO.name}</p>
-                      <p className="font-bold uppercase text-[9px] text-gray-600">
-                        ADVOCATES & COMMISSIONERS FOR OATHS
-                      </p>
-                      <p className="text-[8px] text-gray-500 font-mono mt-0.5">LSK Practicing No. ADMIN/2026/001</p>
-                    </div>
+                  <div className="text-right text-[9px] leading-tight text-gray-800 font-sans space-y-0.5">
+                    <p>{activeFirm.address}</p>
+                    <p>{activeFirm.poBox}</p>
+                    <p>{activeFirm.phone} | {activeFirm.email}</p>
+                    <p className="font-mono font-bold text-black pt-1">Ref: {documentRef}</p>
                   </div>
                 </div>
-              ) : (
-                /* ======================================================== */
-                /* HIGH COURT BILL OF COSTS LIVE A4 PRESENTATION            */
-                /* ======================================================== */
-                <div className="space-y-5">
-                  {/* Official Court & Cause Heading */}
-                  <div className="text-center space-y-1 py-1">
-                    {forumName.split('\n').map((line, i) => (
-                      <h2 key={i} className={`uppercase text-[11px] font-bold ${i === 0 ? 'underline' : ''}`}>{line}</h2>
-                    ))}
-                    {matterTitle && (
-                      <p className="font-bold text-[10.5px] uppercase tracking-wide mt-1">{matterTitle}</p>
-                    )}
-                  </div>
 
-                  {/* Parties Caption Box */}
-                  <div className="border border-black p-2.5 text-[10.5px] space-y-1.5">
-                    <div className="flex justify-between items-baseline font-bold uppercase">
-                      <span>{claimantName.trim() || clientName.trim() || '[CLAIMANT / PLAINTIFF]'}</span>
-                      <span className="text-[9px] text-gray-700 font-mono">
-                        {docType === 'advocate_client' ? 'APPLICANT / ADVOCATE' : isDefendant ? 'RESPONDENT' : 'CLAIMANT'}
-                      </span>
+                {/* DYNAMIC DOCUMENT BODY BASED ON DOCTYPE */}
+                {docType === 'fee_note' ? (
+                  /* ======================================================== */
+                  /* FEE NOTE PROFORMA LIVE A4 PRESENTATION (CLIENT INVOICE) */
+                  /* ======================================================== */
+                  <div className="space-y-4">
+                    {/* Fee Note Title & Metadata Block */}
+                    <div className="flex justify-between items-start border-b border-black pb-3">
+                      <div className="space-y-1 max-w-[60%]">
+                        <span className="font-bold text-[8.5px] uppercase tracking-wider text-gray-600 block">BILLED TO / INSTRUCTING CLIENT:</span>
+                        <h2 className="font-bold text-sm uppercase text-black">{clientName.trim() || claimantName.trim() || '[CLIENT NAME]'}</h2>
+                        <p className="whitespace-pre-line text-[9.5px] text-gray-700 leading-snug">{clientAddress}</p>
+                      </div>
+                      <div className="text-right font-mono text-[9.5px] space-y-0.5">
+                        <p><strong className="font-sans font-bold">FEE NOTE NO:</strong> {documentRef}</p>
+                        <p><strong className="font-sans font-bold">DATE:</strong> {formatLegalDate(dateBilled)}</p>
+                        <p><strong className="font-sans font-bold">KRA PIN:</strong> {activeFirm.kraPin || 'P051123456Z'}</p>
+                        <p><strong className="font-sans font-bold">VAT REG:</strong> {activeFirm.vatNumber || 'VAT-0192834-K'}</p>
+                      </div>
                     </div>
-                    <div className="text-center font-bold text-[9px] tracking-widest text-gray-500">— VERSUS —</div>
-                    <div className="flex justify-between items-baseline font-bold uppercase">
-                      <span>{respondentName.trim() || '[RESPONDENT / DEFENDANT]'}</span>
-                      <span className="text-[9px] text-gray-700 font-mono">
-                        {docType === 'advocate_client' ? 'RESPONDENT / CLIENT' : isDefendant ? 'CLAIMANT' : 'RESPONDENT'}
-                      </span>
+
+                    {/* Document Title Banner */}
+                    <div className="py-2 text-center border-y-2 border-black">
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-black">PROFESSIONAL FEE NOTE</h3>
+                      <p className="text-[9px] text-gray-700 italic mt-0.5">{getDocumentSubtitle()}</p>
                     </div>
-                  </div>
 
-                  {/* Client & Metadata Bar */}
-                  <div className="grid grid-cols-2 gap-4 border-b border-black pb-2 text-[10px]">
-                    <div>
-                      <span className="font-bold block text-[8.5px] uppercase tracking-wider text-gray-600">BILLED TO:</span>
-                      <p className="font-bold text-xs uppercase">{clientName.trim() || claimantName.trim() || 'Client'}</p>
-                    </div>
-                    <div className="text-right font-mono space-y-0.5">
-                      <p><strong className="font-sans font-bold">REF:</strong> {documentRef}</p>
-                      <p><strong className="font-sans font-bold">DATE:</strong> {formatLegalDate(dateBilled)}</p>
-                      <p><strong className="font-sans font-bold">CLAIM VALUE:</strong> {claimValue ? `KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}` : 'Non-Monetary'}</p>
-                    </div>
-                  </div>
-
-                  {/* Document Title Banner */}
-                  <div className="p-1.5 text-center border-y-2 border-black">
-                    <h3 className="font-bold text-xs uppercase tracking-wide">{getDocumentTitle()}</h3>
-                    <p className="text-[9px] text-gray-700 italic mt-0.5">{getDocumentSubtitle()}</p>
-                  </div>
-
-                  {/* Authentic 5-Column Taxation Table */}
-                  <table className="w-full text-left border-collapse border border-black text-[10px]">
-                    <thead>
-                      <tr className="border-b border-black font-bold uppercase text-[9px] bg-slate-50">
-                        <th className="p-2 border-r border-black w-20">DATE</th>
-                        <th className="p-2 border-r border-black w-12 text-center">ITEM</th>
-                        <th className="p-2 border-r border-black">PARTICULARS OF SERVICES RENDERED</th>
-                        <th className="p-2 border-r border-black text-right w-24">CLAIMED (KES)</th>
-                        <th className="p-2 text-right w-20">TAXED OFF</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-black">
-                      {/* Section A: Profit Costs Header */}
-                      <tr className="bg-slate-100 font-bold border-b border-black">
-                        <td colSpan={5} className="p-1 text-center uppercase tracking-wider text-[9px]">
-                          SECTION A: PROFIT COSTS & PROFESSIONAL SERVICES
-                        </td>
-                      </tr>
-
-                      {/* Item 1: Instruction Fee */}
-                      <tr>
-                        <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
-                        <td className="p-2 border-r border-black text-center font-bold">1</td>
-                        <td className="p-2 border-r border-black leading-snug">
-                          <strong className="block font-bold">
-                            {isCustomInstruction ? 'Instruction Fees (Agreed / Retainer per Section 45)' : 'Instruction Fees (Statutory Tariff)'}
-                          </strong>
-                          <span className="text-gray-700 text-[9.5px]">
-                            To receiving instructions to act on behalf of the {docType === 'advocate_client' ? 'Client' : isDefendant ? 'Respondent' : 'Claimant'} in this matter.{' '}
-                            {Number(claimValue) > 0
-                              ? `Assessed ad valorem on subject value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}.`
-                              : 'Subject matter is non-monetary / unquantified; assessed at statutory floor.'}
-                            {docType === 'advocate_client' && ' Includes statutory 50% Advocate & Client uplift under Part B.'}
-                          </span>
-                        </td>
-                        <td className="p-2 border-r border-black text-right font-mono font-bold">
-                          {(result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-2 text-right"></td>
-                      </tr>
-
-                      {/* Item 2: Getting-Up Fee (if litigation and defended) */}
-                      {(result?.getting_up_fee || 0) > 0 && (
-                        <tr>
-                          <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
-                          <td className="p-2 border-r border-black text-center font-bold">2</td>
-                          <td className="p-2 border-r border-black leading-snug">
-                            <strong className="block font-bold">Getting-Up Fees for Trial (Sched. 6 Item 2)</strong>
-                            <span className="text-gray-700 text-[9.5px]">Preparation for trial in defended proceedings (1/3 of Instruction Fee).</span>
-                          </td>
-                          <td className="p-2 border-r border-black text-right font-mono font-bold">
-                            {(result?.getting_up_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="p-2 text-right"></td>
-                        </tr>
+                    {/* Subject Matter Line (No Background Card) */}
+                    <div className="py-2 border-b border-black text-[10px]">
+                      <span className="font-bold uppercase tracking-wider text-[8.5px] text-gray-700 block">SUBJECT MATTER / TRANSACTION:</span>
+                      <p className="font-bold uppercase text-black mt-0.5">{matterTitle || 'Professional Legal Services Rendered'}</p>
+                      {isLinkedCourtMatter && forumName && (
+                        <p className="text-[9px] text-gray-600 mt-0.5 font-mono">Forum: {forumName}</p>
                       )}
+                    </div>
 
-                      {/* Line Items */}
-                      {items.map((it, i) => (
-                        <tr key={i}>
-                          <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
-                          <td className="p-2 border-r border-black text-center font-bold">
-                            {i + ((result?.getting_up_fee || 0) > 0 ? 3 : 2)}
-                          </td>
-                          <td className="p-2 border-r border-black">{it.description}</td>
-                          <td className="p-2 border-r border-black text-right font-mono">
-                            {(it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="p-2 text-right"></td>
+                    {/* 4-Column Professional Fee Note Table (Pure B&W, No Backgrounds) */}
+                    <table className="w-full text-left border-collapse border border-black text-[10px]">
+                      <thead>
+                        <tr className="border-b border-black font-bold uppercase text-[9px]">
+                          <th className="p-2 border-r border-black w-10 text-center">#</th>
+                          <th className="p-2 border-r border-black">PARTICULARS OF LEGAL SERVICES</th>
+                          <th className="p-2 border-r border-black w-36">STATUTORY BASIS</th>
+                          <th className="p-2 text-right w-28">AMOUNT (KES)</th>
                         </tr>
-                      ))}
+                      </thead>
+                      <tbody className="divide-y divide-black">
+                        <tr className="font-bold border-b border-black">
+                          <td colSpan={4} className="p-1 text-center uppercase tracking-wider text-[9px]">
+                            SECTION A: PROFESSIONAL LEGAL FEES (PROFIT COSTS)
+                          </td>
+                        </tr>
+                        {/* Item 1: Instruction Fee */}
+                        <tr>
+                          <td className="p-2 border-r border-black text-center font-bold">1</td>
+                          <td className="p-2 border-r border-black leading-snug">
+                            <strong className="block font-bold">
+                              {isCustomInstruction ? 'Instruction Fees (Agreed Retainer per Section 45)' : 'Professional Instruction Fees'}
+                            </strong>
+                            <span className="text-gray-700 text-[9.5px]">
+                              {Number(claimValue) > 0
+                                ? `Assessed ad valorem based on subject transaction value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}.`
+                                : 'Professional legal advisory and representation fee.'}
+                            </span>
+                          </td>
+                          <td className="p-2 border-r border-black text-[9px] font-mono text-gray-700">
+                            {STATUTORY_SCHEDULES.find(s => s.id === courtSchedule)?.category || 'Statutory Order'}
+                          </td>
+                          <td className="p-2 text-right font-mono font-bold">
+                            {(result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
 
-                      {/* Item for Taxation Attendance - Rule 69(3) Advocates Remuneration Order */}
-                      <tr>
-                        <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
-                        <td className="p-2 border-r border-black text-center font-bold">
-                          {items.length + ((result?.getting_up_fee || 0) > 0 ? 3 : 2)}
-                        </td>
-                        <td className="p-2 border-r border-black leading-snug">
-                          <strong className="block font-bold">Attending taxation of this Bill of Costs before the Taxing Officer</strong>
-                          <span className="text-gray-600 italic text-[9px]">(Rule 69(3) Advocates Remuneration Order - Amount left blank for Taxing Officer to assess)</span>
-                        </td>
-                        <td className="p-2 border-r border-black text-right font-mono text-[9px] text-gray-500 italic">
-                          [ To be assessed ]
-                        </td>
-                        <td className="p-2 text-right"></td>
-                      </tr>
-
-                      {/* Subtotal Profit Costs */}
-                      <tr className="font-bold border-t-2 border-black bg-slate-50">
-                        <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Subtotal Professional Fees:</td>
-                        <td className="p-2 border-r border-black text-right font-mono font-bold">
-                          {(result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-2 text-right"></td>
-                      </tr>
-
-                      {/* VAT */}
-                      <tr className="font-semibold border-t border-black bg-white">
-                        <td colSpan={3} className="p-2 text-right uppercase text-[9px]">
-                          {applyVat ? 'VAT (16% on Professional Fees — VAT Act 2013):' : 'VAT (16% — Exempt):'}
-                        </td>
-                        <td className="p-2 border-r border-black text-right font-mono font-bold text-emerald-800">
-                          {(applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-2 text-right"></td>
-                      </tr>
-
-                      {/* Section B: Disbursements */}
-                      {extraExpenses.length > 0 && (
-                        <>
-                          <tr className="bg-slate-100 font-bold border-t-2 border-black">
-                            <td colSpan={5} className="p-1 text-center uppercase tracking-wider text-[9px]">
-                              SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)
+                        {/* Line Items */}
+                        {items.map((it, i) => (
+                          <tr key={i}>
+                            <td className="p-2 border-r border-black text-center font-bold">{i + 2}</td>
+                            <td className="p-2 border-r border-black">{it.description}</td>
+                            <td className="p-2 border-r border-black text-[9px] text-gray-600 font-mono">Professional Attendances</td>
+                            <td className="p-2 text-right font-mono">
+                              {(it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                             </td>
                           </tr>
-                          {extraExpenses.map((exp, i) => (
-                            <tr key={`exp-${i}`}>
-                              <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
-                              <td className="p-2 border-r border-black text-center font-bold font-mono">D{i + 1}</td>
-                              <td className="p-2 border-r border-black">{exp.description}</td>
-                              <td className="p-2 border-r border-black text-right font-mono font-bold text-emerald-900">
-                                {exp.unitRate.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                        ))}
+
+                        {/* Subtotal Profit Costs */}
+                        <tr className="font-bold border-t-2 border-black">
+                          <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Subtotal Professional Legal Fees:</td>
+                          <td className="p-2 text-right font-mono font-bold">
+                            {(result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+
+                        {/* VAT */}
+                        <tr className="font-semibold border-t border-black">
+                          <td colSpan={3} className="p-2 text-right uppercase text-[9px]">
+                            {applyVat ? 'VAT (16% on Professional Fees — VAT Act 2013):' : 'VAT (16% — Exempt):'}
+                          </td>
+                          <td className="p-2 text-right font-mono font-bold">
+                            {(applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+
+                        {/* Section B: Disbursements */}
+                        {extraExpenses.length > 0 && (
+                          <>
+                            <tr className="font-bold border-t-2 border-b border-black">
+                              <td colSpan={4} className="p-1 text-center uppercase tracking-wider text-[9px]">
+                                SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)
                               </td>
-                              <td className="p-2 text-right"></td>
                             </tr>
-                          ))}
-                          <tr className="font-bold border-t border-black bg-slate-50">
-                            <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Total Out-of-Pocket Disbursements:</td>
+                            {extraExpenses.map((exp, i) => (
+                              <tr key={`exp-${i}`}>
+                                <td className="p-2 border-r border-black text-center font-bold font-mono">D{i + 1}</td>
+                                <td className="p-2 border-r border-black">{exp.description}</td>
+                                <td className="p-2 border-r border-black text-[9px] text-gray-600 font-mono">Receipt Attached</td>
+                                <td className="p-2 text-right font-mono font-bold">
+                                  {exp.unitRate.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr className="font-bold border-t border-black">
+                              <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Total Out-of-Pocket Disbursements:</td>
+                              <td className="p-2 text-right font-mono font-bold">
+                                {(result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </>
+                        )}
+
+                        {/* Grand Total */}
+                        <tr className="font-bold border-t-2 border-b-2 border-black text-black">
+                          <td colSpan={3} className="p-2.5 text-right uppercase tracking-wider text-[10px] font-bold">
+                            TOTAL AMOUNT DUE FOR REMITTANCE (KES):
+                          </td>
+                          <td className="p-2.5 text-right font-mono font-extrabold text-xs text-black">
+                            {(result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Payment Information Box (Minimalist, Bank & MPesa Details Only) */}
+                    <div className="border border-black p-3 text-[9.5px] space-y-1.5">
+                      <p className="font-bold uppercase tracking-wider text-[9px] text-black">PAYMENT INFORMATION</p>
+                      <p className="text-gray-900 leading-relaxed">
+                        <strong className="font-bold">Bank:</strong> {activeFirm.bankName || 'KCB Bank Kenya'} &bull; <strong className="font-bold">Branch:</strong> {activeFirm.bankBranch || 'Riverside'} &bull; <strong className="font-bold">Account:</strong> {activeFirm.bankAccount || '1104889922'} &bull; <strong className="font-bold">Swift:</strong> {activeFirm.swiftCode || 'KCBLKENX'}
+                      </p>
+                      <p className="text-gray-900">
+                        <strong className="font-bold">M-Pesa Paybill:</strong> {activeFirm.mpesaPaybill || '522522'} &bull; <strong className="font-bold">Account Ref:</strong> {documentRef}
+                      </p>
+                    </div>
+
+                    {/* Sign-off: Date on Left, Endorsement & Scannable QR Code on Right */}
+                    <div className="pt-6 pb-2 text-[10px] font-sans">
+                      <div className="flex justify-between items-start">
+                        {/* Left Side: Date & Reference */}
+                        <div className="space-y-1">
+                          <p><strong>Dated:</strong> {formatLegalDate(dateBilled)}</p>
+                          <p className="text-[9px] text-gray-700 font-mono"><strong>Ref:</strong> {documentRef}</p>
+                        </div>
+
+                        {/* Center / Right Side: Signature Blank, Stamp, Name, Roll & Scannable QR */}
+                        <div className="flex flex-col items-center text-center min-w-[240px]">
+                          {stampOfficial && (
+                            <div className="mb-[-24px] w-28 h-28 select-none pointer-events-none">
+                              <img
+                                src={stampImageUrl}
+                                alt="Official Firm Stamp"
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                          )}
+
+                          <div className="border-b border-black w-60 mb-1.5"></div>
+                          <p className="font-bold uppercase font-brand text-[11px] tracking-tight">{activeFirm.name}</p>
+                          <p className="font-bold uppercase text-[9px] text-gray-700">
+                            ADVOCATES &amp; COMMISSIONERS FOR OATHS
+                          </p>
+                          <p className="text-[8px] text-gray-600 font-mono">LSK Practicing Roll: ADMIN/2026/001</p>
+
+                          {/* Scannable Confirmation QR Code right under the words */}
+                          {securityRecord?.qrCodeDataUrl && (
+                            <div className="mt-3 flex flex-col items-center">
+                              <img
+                                src={securityRecord.qrCodeDataUrl}
+                                alt="Confirmation QR"
+                                className="w-16 h-16 object-contain"
+                              />
+                              <span className="text-[7.5px] font-mono text-gray-600 mt-1">Scan to verify authenticity</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* ======================================================== */
+                  /* HIGH COURT BILL OF COSTS LIVE A4 PRESENTATION            */
+                  /* ======================================================== */
+                  <div className="space-y-4">
+                    {/* Official Court & Cause Heading */}
+                    <div className="text-center space-y-1 py-1">
+                      {forumName.split('\n').map((line, i) => (
+                        <h2 key={i} className={`uppercase text-[11px] font-bold ${i === 0 ? 'underline' : ''}`}>{line}</h2>
+                      ))}
+                      {matterTitle && (
+                        <p className="font-bold text-[10.5px] uppercase tracking-wide mt-1">{matterTitle}</p>
+                      )}
+                    </div>
+
+                    {/* Parties Caption Box */}
+                    <div className="border border-black p-2.5 text-[10.5px] space-y-1.5">
+                      <div className="flex justify-between items-baseline font-bold uppercase">
+                        <span>{claimantName.trim() || clientName.trim() || '[CLAIMANT / PLAINTIFF]'}</span>
+                        <span className="text-[9px] text-gray-700 font-mono">
+                          {docType === 'advocate_client' ? 'APPLICANT / ADVOCATE' : isDefendant ? 'RESPONDENT' : 'CLAIMANT'}
+                        </span>
+                      </div>
+                      <div className="text-center font-bold text-[9px] tracking-widest text-gray-500">— VERSUS —</div>
+                      <div className="flex justify-between items-baseline font-bold uppercase">
+                        <span>{respondentName.trim() || '[RESPONDENT / DEFENDANT]'}</span>
+                        <span className="text-[9px] text-gray-700 font-mono">
+                          {docType === 'advocate_client' ? 'RESPONDENT / CLIENT' : isDefendant ? 'CLAIMANT' : 'RESPONDENT'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Client & Metadata Bar */}
+                    <div className="grid grid-cols-2 gap-4 border-b border-black pb-2 text-[10px]">
+                      <div>
+                        <span className="font-bold block text-[8.5px] uppercase tracking-wider text-gray-600">BILLED TO:</span>
+                        <p className="font-bold text-xs uppercase">{clientName.trim() || claimantName.trim() || 'Client'}</p>
+                      </div>
+                      <div className="text-right font-mono space-y-0.5">
+                        <p><strong className="font-sans font-bold">REF:</strong> {documentRef}</p>
+                        <p><strong className="font-sans font-bold">DATE:</strong> {formatLegalDate(dateBilled)}</p>
+                        <p><strong className="font-sans font-bold">CLAIM VALUE:</strong> {claimValue ? `KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}` : 'Non-Monetary'}</p>
+                      </div>
+                    </div>
+
+                    {/* Document Title Banner */}
+                    <div className="py-2 text-center border-y-2 border-black">
+                      <h3 className="font-bold text-xs uppercase tracking-wide text-black">{getDocumentTitle()}</h3>
+                      <p className="text-[9px] text-gray-700 italic mt-0.5">{getDocumentSubtitle()}</p>
+                    </div>
+
+                    {/* Authentic 5-Column Taxation Table (Pure B&W) */}
+                    <table className="w-full text-left border-collapse border border-black text-[10px]">
+                      <thead>
+                        <tr className="border-b border-black font-bold uppercase text-[9px]">
+                          <th className="p-2 border-r border-black w-20">DATE</th>
+                          <th className="p-2 border-r border-black w-12 text-center">ITEM</th>
+                          <th className="p-2 border-r border-black">PARTICULARS OF SERVICES RENDERED</th>
+                          <th className="p-2 border-r border-black text-right w-24">CLAIMED (KES)</th>
+                          <th className="p-2 text-right w-20">TAXED OFF</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black">
+                        {/* Section A: Profit Costs Header */}
+                        <tr className="font-bold border-b border-black">
+                          <td colSpan={5} className="p-1 text-center uppercase tracking-wider text-[9px]">
+                            SECTION A: PROFIT COSTS &amp; PROFESSIONAL SERVICES
+                          </td>
+                        </tr>
+
+                        {/* Item 1: Instruction Fee */}
+                        <tr>
+                          <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
+                          <td className="p-2 border-r border-black text-center font-bold">1</td>
+                          <td className="p-2 border-r border-black leading-snug">
+                            <strong className="block font-bold">
+                              {isCustomInstruction ? 'Instruction Fees (Agreed / Retainer per Section 45)' : 'Instruction Fees (Statutory Tariff)'}
+                            </strong>
+                            <span className="text-gray-700 text-[9.5px]">
+                              To receiving instructions to act on behalf of the {docType === 'advocate_client' ? 'Client' : isDefendant ? 'Respondent' : 'Claimant'} in this matter.{' '}
+                              {Number(claimValue) > 0
+                                ? `Assessed ad valorem on subject value of KES ${Number(claimValue).toLocaleString('en-KE', { minimumFractionDigits: 2 })}.`
+                                : 'Subject matter is non-monetary / unquantified; assessed at statutory floor.'}
+                              {docType === 'advocate_client' && ' Includes statutory 50% Advocate & Client uplift under Part B.'}
+                            </span>
+                          </td>
+                          <td className="p-2 border-r border-black text-right font-mono font-bold">
+                            {(result?.instruction_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-2 text-right"></td>
+                        </tr>
+
+                        {/* Item 2: Getting-Up Fee (if litigation and defended) */}
+                        {(result?.getting_up_fee || 0) > 0 && (
+                          <tr>
+                            <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
+                            <td className="p-2 border-r border-black text-center font-bold">2</td>
+                            <td className="p-2 border-r border-black leading-snug">
+                              <strong className="block font-bold">Getting-Up Fees for Trial (Sched. 6 Item 2)</strong>
+                              <span className="text-gray-700 text-[9.5px]">Preparation for trial in defended proceedings (1/3 of Instruction Fee).</span>
+                            </td>
                             <td className="p-2 border-r border-black text-right font-mono font-bold">
-                              {(result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                              {(result?.getting_up_fee || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                             </td>
                             <td className="p-2 text-right"></td>
                           </tr>
-                        </>
-                      )}
-
-                      {/* Grand Total */}
-                      <tr className="font-bold border-t-2 border-black bg-slate-900 text-white">
-                        <td colSpan={3} className="p-2.5 text-right uppercase tracking-wider text-[10px]">GRAND TOTAL AMOUNT DUE (KES):</td>
-                        <td className="p-2.5 border-r border-black text-right font-mono font-extrabold text-xs text-white">
-                          {(result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-2.5 text-right"></td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  {/* Endorsement & Sign-Off Block (Ample space to sit at the very bottom) */}
-                  <div className="pt-16 space-y-8 text-[10px] font-sans">
-                    <div className="flex justify-between items-end border-t border-black pt-2">
-                      <div>
-                        <strong>DATED</strong> at <strong>NAIROBI</strong> this <strong>{formatLegalDate(dateBilled)}</strong>
-                      </div>
-                      <div className="text-right text-[9px] text-gray-600 font-mono">
-                        Reference: <strong>{documentRef}</strong>
-                      </div>
-                    </div>
-
-                    {/* Centered Stamp & Sign-off Block */}
-                    <div className="relative text-center pt-2">
-                      {/* Stamp: QR hidden underneath, real stamp PNG on top */}
-                      {stampOfficial && (
-                        <div className="relative mx-auto mb-[-28px] w-32 h-32 select-none pointer-events-none">
-                          {/* Hidden micro-QR sits dead center, stamp PNG covers it */}
-                          {securityRecord?.qrCodeDataUrl && (
-                            <img
-                              src={securityRecord.qrCodeDataUrl}
-                              alt=""
-                              aria-hidden="true"
-                              className="absolute inset-0 m-auto w-12 h-12 opacity-[0.18]"
-                            />
-                          )}
-                          {/* Real firm stamp PNG on top */}
-                          <img
-                            src={stampImageUrl}
-                            alt="Official Firm Stamp"
-                            className="absolute inset-0 w-full h-full object-contain"
-                          />
-                        </div>
-                      )}
-
-                      <div className="border-b border-black w-64 mx-auto mb-1.5"></div>
-                      <p className="font-bold uppercase font-brand text-[11px]">{EXACT_FIRM_INFO.name}</p>
-                      <p className="font-bold uppercase text-[9px] text-gray-600">
-                        {docType === 'advocate_client' ? 'ADVOCATES FOR THE APPLICANT' : `ADVOCATES FOR THE ${isDefendant ? 'RESPONDENT' : 'CLAIMANT'}`}
-                      </p>
-                      <p className="text-[8px] text-gray-500 font-mono mt-0.5">LSK Practicing No. ADMIN/2026/001</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-8 pt-4 border-t border-slate-300 text-[9.5px]">
-                      <div>
-                        <p className="font-bold underline uppercase mb-1">DRAWN & FILED BY:</p>
-                        <p className="whitespace-pre-line text-gray-800">{drawnByAddress}</p>
-                      </div>
-                      <div>
-                        <p className="font-bold underline uppercase mb-1">TO BE SERVED UPON:</p>
-                        {servedUponAddress.trim() ? (
-                          <p className="whitespace-pre-line text-gray-800">{servedUponAddress}</p>
-                        ) : (
-                          <p className="text-gray-400 italic text-[9px]">
-                            [Opponent Advocate details to be endorsed upon filing and service]
-                          </p>
                         )}
+
+                        {/* Line Items */}
+                        {items.map((it, i) => (
+                          <tr key={i}>
+                            <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
+                            <td className="p-2 border-r border-black text-center font-bold">
+                              {i + ((result?.getting_up_fee || 0) > 0 ? 3 : 2)}
+                            </td>
+                            <td className="p-2 border-r border-black">{it.description}</td>
+                            <td className="p-2 border-r border-black text-right font-mono">
+                              {(it.unitRate || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-2 text-right"></td>
+                          </tr>
+                        ))}
+
+                        {/* Item for Taxation Attendance - Rule 69(3) Advocates Remuneration Order */}
+                        <tr>
+                          <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
+                          <td className="p-2 border-r border-black text-center font-bold">
+                            {items.length + ((result?.getting_up_fee || 0) > 0 ? 3 : 2)}
+                          </td>
+                          <td className="p-2 border-r border-black leading-snug">
+                            <strong className="block font-bold">Attending taxation of this Bill of Costs before the Taxing Officer</strong>
+                            <span className="text-gray-600 italic text-[9px]">(Rule 69(3) Advocates Remuneration Order - Amount left blank for Taxing Officer to assess)</span>
+                          </td>
+                          <td className="p-2 border-r border-black text-right font-mono text-[9px] text-gray-500 italic">
+                            [ To be assessed ]
+                          </td>
+                          <td className="p-2 text-right"></td>
+                        </tr>
+
+                        {/* Subtotal Profit Costs */}
+                        <tr className="font-bold border-t-2 border-black">
+                          <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Subtotal Professional Fees:</td>
+                          <td className="p-2 border-r border-black text-right font-mono font-bold">
+                            {(result?.taxable_subtotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-2 text-right"></td>
+                        </tr>
+
+                        {/* VAT */}
+                        <tr className="font-semibold border-t border-black">
+                          <td colSpan={3} className="p-2 text-right uppercase text-[9px]">
+                            {applyVat ? 'VAT (16% on Professional Fees — VAT Act 2013):' : 'VAT (16% — Exempt):'}
+                          </td>
+                          <td className="p-2 border-r border-black text-right font-mono font-bold">
+                            {(applyVat ? (result?.vat_amount || 0) : 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-2 text-right"></td>
+                        </tr>
+
+                        {/* Section B: Disbursements */}
+                        {extraExpenses.length > 0 && (
+                          <>
+                            <tr className="font-bold border-t-2 border-b border-black">
+                              <td colSpan={5} className="p-1 text-center uppercase tracking-wider text-[9px]">
+                                SECTION B: OUT-OF-POCKET DISBURSEMENTS (ZERO-RATED / PASS-THROUGH)
+                              </td>
+                            </tr>
+                            {extraExpenses.map((exp, i) => (
+                              <tr key={`exp-${i}`}>
+                                <td className="p-2 border-r border-black font-mono text-[9px]">{formatLegalDate(dateBilled)}</td>
+                                <td className="p-2 border-r border-black text-center font-bold font-mono">D{i + 1}</td>
+                                <td className="p-2 border-r border-black">{exp.description}</td>
+                                <td className="p-2 border-r border-black text-right font-mono font-bold">
+                                  {exp.unitRate.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2 text-right"></td>
+                              </tr>
+                            ))}
+                            <tr className="font-bold border-t border-black">
+                              <td colSpan={3} className="p-2 text-right uppercase text-[9px]">Total Out-of-Pocket Disbursements:</td>
+                              <td className="p-2 border-r border-black text-right font-mono font-bold">
+                                {(result?.disbursements || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="p-2 text-right"></td>
+                            </tr>
+                          </>
+                        )}
+
+                        {/* Grand Total */}
+                        <tr className="font-bold border-t-2 border-b-2 border-black text-black">
+                          <td colSpan={3} className="p-2.5 text-right uppercase tracking-wider text-[10px] font-bold">GRAND TOTAL AMOUNT DUE (KES):</td>
+                          <td className="p-2.5 border-r border-black text-right font-mono font-extrabold text-xs text-black">
+                            {(result?.grand_total || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-2.5 text-right"></td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Endorsement & Sign-Off Block */}
+                    <div className="pt-6 pb-2 text-[10px] font-sans">
+                      <div className="flex justify-between items-start">
+                        {/* Left Side: Date & Reference */}
+                        <div className="space-y-1">
+                          <p><strong>Dated:</strong> {formatLegalDate(dateBilled)}</p>
+                          <p className="text-[9px] text-gray-700 font-mono"><strong>Ref:</strong> {documentRef}</p>
+                        </div>
+
+                        {/* Center / Right Side: Signature Blank, Stamp, Role & Scannable QR */}
+                        <div className="flex flex-col items-center text-center min-w-[240px]">
+                          {stampOfficial && (
+                            <div className="mb-[-24px] w-28 h-28 select-none pointer-events-none">
+                              <img
+                                src={stampImageUrl}
+                                alt="Official Firm Stamp"
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                          )}
+
+                          <div className="border-b border-black w-60 mb-1.5"></div>
+                          <p className="font-bold uppercase font-brand text-[11px] tracking-tight">{activeFirm.name}</p>
+                          <p className="font-bold uppercase text-[9px] text-gray-700">
+                            {docType === 'advocate_client' ? 'ADVOCATES FOR THE APPLICANT' : `ADVOCATES FOR THE ${isDefendant ? 'RESPONDENT' : 'CLAIMANT'}`}
+                          </p>
+                          <p className="text-[8px] text-gray-600 font-mono">LSK Practicing Roll: ADMIN/2026/001</p>
+
+                          {/* Scannable Confirmation QR Code right under the words */}
+                          {securityRecord?.qrCodeDataUrl && (
+                            <div className="mt-3 flex flex-col items-center">
+                              <img
+                                src={securityRecord.qrCodeDataUrl}
+                                alt="Confirmation QR"
+                                className="w-16 h-16 object-contain"
+                              />
+                              <span className="text-[7.5px] font-mono text-gray-600 mt-1">Scan to verify authenticity</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-8 pt-6 border-t border-black text-[9.5px]">
+                        <div>
+                          <p className="font-bold underline uppercase mb-1">DRAWN &amp; FILED BY:</p>
+                          <p className="whitespace-pre-line text-gray-800">{drawnByAddress}</p>
+                        </div>
+                        <div>
+                          <p className="font-bold underline uppercase mb-1">TO BE SERVED UPON:</p>
+                          {servedUponAddress.trim() ? (
+                            <p className="whitespace-pre-line text-gray-800">{servedUponAddress}</p>
+                          ) : (
+                            <p className="text-gray-400 italic text-[9px]">
+                              [Opponent Advocate details to be endorsed upon filing and service]
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
       </div>
