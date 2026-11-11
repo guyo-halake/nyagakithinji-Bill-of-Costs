@@ -10,7 +10,7 @@ import {
   UserCheck, HelpCircle, Code, Play, CheckSquare, BarChart3, TrendingUp, Filter, Hash, UserPlus,
   Kanban, MoveRight, ArrowLeftRight, CheckCheck, Github, Laptop, Smartphone, BookOpen, Video, Calendar,
   FileCode, PlayCircle, FolderArchive, Wifi, RefreshCcw, Sun, Satellite, Printer, Receipt, MessageCircle,
-  Battery, BatteryCharging, Cloud, ArrowLeft, Award, Check, Scale
+  Battery, BatteryCharging, Cloud, ArrowLeft, Award, Check, Scale, FileSpreadsheet
 } from 'lucide-react';
 import { 
   FiBookOpen, 
@@ -33,10 +33,14 @@ import { DarajaListenerCard } from './DarajaListenerCard';
 import { MarsabitPowerView } from './MarsabitPowerView';
 import { AdminMessagesHubView } from './AdminMessagesHubView';
 import { AdminSupportDeskView } from './AdminSupportDeskView';
+import { AdminBillsOfCostsStudioView } from './AdminBillsOfCostsStudioView';
+import { AdminAiLegalAgentsView } from './AdminAiLegalAgentsView';
 
 type AdminTab = 
   | 'dashboard'
   | 'karani_erp'
+  | 'bills_studio'
+  | 'legal_ai_agents'
   | 'projects_clients'
   | 'client_crm'
   | 'finance_billing'
@@ -1728,6 +1732,8 @@ export const AdminDashboard: React.FC = () => {
 
   const navItems: Array<{ id: AdminTab; label: string; icon: any; count?: number; badge?: string }> = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'bills_studio', label: 'Bills of Costs Studio', icon: FileSpreadsheet, badge: 'KES 30.8M' },
+    { id: 'legal_ai_agents', label: 'Legal AI Agents', icon: Bot, badge: '4 Agents' },
     { id: 'karani_erp', label: 'Nyaga Law Firm ERP', icon: Scale },
     { id: 'projects_clients', label: 'P3L Projects', icon: Briefcase, count: projects.length },
     { id: 'client_crm', label: 'Clients', icon: UserCheck, count: 5 },
@@ -2403,6 +2409,20 @@ export const AdminDashboard: React.FC = () => {
                 {/* Live Safaricom Daraja 2.0 Webhook Stream Card */}
                 <DarajaListenerCard showToast={showToast} />
               </div>
+            )}
+
+            {/* ========================================================================= */}
+            {/* TAB: BILLS OF COSTS & TAXATION STUDIO */}
+            {/* ========================================================================= */}
+            {activeTab === 'bills_studio' && (
+              <AdminBillsOfCostsStudioView showToast={showToast} />
+            )}
+
+            {/* ========================================================================= */}
+            {/* TAB: LEGAL AI AGENTS STUDIO (TAXATION, AUDITOR, DISPATCH, WATCHDOG) */}
+            {/* ========================================================================= */}
+            {activeTab === 'legal_ai_agents' && (
+              <AdminAiLegalAgentsView showToast={showToast} />
             )}
 
             {/* ========================================================================= */}

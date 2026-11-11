@@ -1,0 +1,165 @@
+{
+  "name": "Nyagah B. Kithinji & Co. Advocates — Master n8n Automation Suite",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 6 * * 1-5"
+            }
+          ]
+        }
+      },
+      "name": "Cron Trigger (6:30 AM EAT Mon-Fri)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://judiciary.go.ke/cause-lists/daily-milimani-commercial-high-court.json",
+        "options": {}
+      },
+      "name": "Scrape Daily Cause Lists",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, case_number, assigned_advocate FROM matters WHERE status != 'CLOSED';"
+      },
+      "name": "Fetch Active Firm Matters (Supabase/Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "modelName": "gemini-2.5-flash",
+        "prompt": "You are the Legal Cause List Watchdog for Nyagah B. Kithinji & Co. Advocates. Compare today's court cause list with active matters. Extract matching courtroom numbers, hearing stages (mention, ruling, hearing), and virtual Teams meeting links. Output a formatted briefing in clean Markdown."
+      },
+      "name": "AI Cause List Matcher",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://localhost:3000/api/waha/sendText",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"chatId\": \"254768141129@c.us\",\n  \"text\": $json.briefingText\n}"
+      },
+      "name": "Send WhatsApp Briefing to Adv. Nyagah",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "daraja-m-pesa-auto-sweep",
+        "options": {}
+      },
+      "name": "Daraja 2.0 Webhook Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 550]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE fee_notes SET status = 'PAID', paid_at = NOW() WHERE bill_number = $json.BillRefNumber RETURNING *;"
+      },
+      "name": "Reconcile Fee Note in DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [450, 550]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://localhost:3000/api/waha/sendFile",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"chatId\": \"254768141129@c.us\",\n  \"caption\": \"⚖️ Nyagah & Co. Advocates: Payment received KES \" + $json.TransAmount + \" for fee note \" + $json.BillRefNumber,\n  \"file\": {\n    \"url\": \"http://localhost:3000/api/receipts/\" + $json.TransID + \".pdf\",\n    \"filename\": \"Official_Fee_Receipt_\" + $json.BillRefNumber + \".pdf\"\n  }\n}"
+      },
+      "name": "Send Verified PDF Receipt via WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [650, 550]
+    }
+  ],
+  "connections": {
+    "Cron Trigger (6:30 AM EAT Mon-Fri)": {
+      "main": [
+        [
+          {
+            "node": "Scrape Daily Cause Lists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Daily Cause Lists": {
+      "main": [
+        [
+          {
+            "node": "Fetch Active Firm Matters (Supabase/Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Active Firm Matters (Supabase/Postgres)": {
+      "main": [
+        [
+          {
+            "node": "AI Cause List Matcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Cause List Matcher": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Briefing to Adv. Nyagah",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daraja 2.0 Webhook Receiver": {
+      "main": [
+        [
+          {
+            "node": "Reconcile Fee Note in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconcile Fee Note in DB": {
+      "main": [
+        [
+          {
+            "node": "Send Verified PDF Receipt via WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
+
