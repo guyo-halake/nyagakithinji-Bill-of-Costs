@@ -170,29 +170,29 @@ export const AdminClientCrmView: React.FC<AdminClientCrmViewProps> = ({
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* Header */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Minimalist Header (No Card Background) */}
+      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
             <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
-              Client CRM &middot; Accounts &amp; Communications
+              Clients
             </h2>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-              5 Active Accounts
+              5 Accounts
             </span>
           </div>
           <p className="text-xs text-zinc-500 mt-1">
-            Real Direct Client Accounts &middot; WhatsApp Dispatch &middot; Retainer Terms &middot; Direct Dossier Links
+            Client contacts, WhatsApp messages, and monthly retainer details
           </p>
         </div>
         <div className="flex items-center gap-2.5">
           <button 
             onClick={() => setShowAddClientModal(true)}
-            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-2xs cursor-pointer flex items-center gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
-            Add New Client
+            Add Client
           </button>
         </div>
       </div>

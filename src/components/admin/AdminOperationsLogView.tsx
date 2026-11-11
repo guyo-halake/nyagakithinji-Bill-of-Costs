@@ -164,20 +164,20 @@ export const AdminOperationsLogView: React.FC<AdminOperationsLogViewProps> = ({ 
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* Header */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Minimalist Header (No Card Background) */}
+      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
             <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
-              Operations &amp; Security Audit Log
+              Server Audit Logs
             </h2>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-              Live Stream
+              Live
             </span>
           </div>
           <p className="text-xs text-zinc-500 mt-1">
-            Real-time Immutable Admin Action Feed &middot; Security Events &middot; Diagnostic Payloads
+            Recent server, database, and payment activity logs
           </p>
         </div>
         <div className="flex items-center gap-2">
