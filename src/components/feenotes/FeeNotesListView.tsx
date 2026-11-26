@@ -51,7 +51,7 @@ import {
   EXACT_FIRM_INFO,
   supabase
 } from '../../services/supabase';
-import { fetchClients } from '../../services/data';
+import { fetchClients, isValidUuid } from '../../services/data';
 import { sendEmail } from '../../services/email';
 import { getSavedEmailTemplates, renderTemplateText } from '../../services/emailTemplates';
 import { SystemUser } from '../../services/supabase';
@@ -214,46 +214,46 @@ export const FeeNotesListView: React.FC<FeeNotesListViewProps> = ({
   // REAL CLONE FUNCTION: Clones bill, persists to state, LocalStorage, and Supabase
   const handleCloneNote = async (fn: ExactFeeNoteRecord) => {
     setActiveMenuId(null);
-    const newId = 'fn-' + Date.now();
     const newBillNo = fn.billNumber + '-COPY';
 
-    const cloned: ExactFeeNoteRecord = {
-      ...fn,
-      id: newId,
-      billNumber: newBillNo,
-      matterTitle: fn.matterTitle + ' (Copy)',
-      status: 'draft',
-      createdAt: new Date().toISOString()
-    };
-
-    const updated = [cloned, ...feeNotesList];
-    setFeeNotesList(updated);
-    persistFeeNotes(updated);
-
-    // Attempt remote save if Supabase is connected
     try {
-      if (currentUser?.firmId) {
-        await supabase.from('fee_notes').insert({
-          id: newId,
-          firm_id: currentUser.firmId,
-          bill_number: newBillNo,
-          matter_id: fn.matterId || '',
-          matter_title: cloned.matterTitle,
-          client_name: fn.clientName,
-          court_schedule: fn.courtSchedule,
-          claim_value: fn.claimValue,
-          instruction_fee: fn.instructionFee,
-          getting_up_fee: fn.gettingUpFee,
-          grand_total: fn.grandTotal,
-          status: 'draft',
-          generated_by_user: currentUser.fullName || fn.generatedByUser,
-          generated_by_user_id: currentUser.id || fn.generatedByUserId,
-          created_at: cloned.createdAt
-        });
+      if (!currentUser?.firmId || !currentUser.id) {
+        throw new Error('Your firm account could not be verified. Sign out and sign in again.');
       }
+      const createdAt = new Date().toISOString();
+      const { data, error } = await supabase.from('fee_notes').insert({
+        firm_id: currentUser.firmId,
+        bill_number: newBillNo,
+        ...(isValidUuid(fn.matterId) ? { matter_id: fn.matterId } : {}),
+        matter_title: fn.matterTitle + ' (Copy)',
+        client_name: fn.clientName,
+        court_schedule: fn.courtSchedule,
+        claim_value: fn.claimValue,
+        instruction_fee: fn.instructionFee,
+        getting_up_fee: fn.gettingUpFee,
+        grand_total: fn.grandTotal,
+        status: 'draft',
+        generated_by_user: currentUser.fullName || fn.generatedByUser,
+        generated_by_user_id: currentUser.id,
+        created_at: createdAt
+      }).select('id').single();
+      if (error) throw error;
+      if (!data) throw new Error('The cloned fee note was not returned after saving.');
+
+      const cloned: ExactFeeNoteRecord = {
+        ...fn,
+        id: data.id,
+        billNumber: newBillNo,
+        matterTitle: fn.matterTitle + ' (Copy)',
+        status: 'draft',
+        createdAt
+      };
+      const updated = [cloned, ...feeNotesList];
+      setFeeNotesList(updated);
+      persistFeeNotes(updated);
       showToast(`Bill cloned as draft: ${newBillNo}`);
-    } catch (err) {
-      showToast(`Bill cloned as draft: ${newBillNo}`);
+    } catch (error: any) {
+      setErrorMessage(error.message || `We could not clone fee note "${fn.billNumber}".`);
     }
   };
 

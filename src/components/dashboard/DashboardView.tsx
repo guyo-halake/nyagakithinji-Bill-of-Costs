@@ -1246,8 +1246,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const handleConfirmSave = async () => {
     setIsImportSubmitting(true);
     try {
-      const firmId = currentUser?.firmId || 'firm-001';
-      const userId = currentUser?.id || 'usr-karani-001';
+      if (!currentUser?.firmId || !currentUser.id) {
+        throw new Error('Your firm account could not be verified. Sign out and sign in again.');
+      }
+      const firmId = currentUser.firmId;
+      const userId = currentUser.id;
       const userName = currentUser?.fullName || 'Advocate';
       const totalAmount = parsedMeta.grandTotal || 405594.00;
 
@@ -1293,26 +1296,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       };
 
       // Real Supabase persistence
-      try {
-        await createImportedFeeNote(
-          firmId,
-          userId,
-          {
-            matterTitle: targetMatterTitle,
-            clientName: clientNameFinal,
-            claimantName: newImportedNote.claimantName,
-            respondentName: newImportedNote.respondentName,
-            judgeName: newImportedNote.judgeName,
-            forumName: newImportedNote.forumName,
-            courtSchedule: newImportedNote.courtSchedule,
-          },
-          totalAmount,
-          [],
-          excelData
-        );
-      } catch (err) {
-        console.warn('Supabase remote fee_notes insert notice:', err);
-      }
+      const savedImportedNote = await createImportedFeeNote(
+        firmId,
+        userId,
+        {
+          billNumber: targetBillNumber,
+          matterTitle: targetMatterTitle,
+          clientName: clientNameFinal,
+          claimantName: newImportedNote.claimantName,
+          respondentName: newImportedNote.respondentName,
+          judgeName: newImportedNote.judgeName,
+          forumName: newImportedNote.forumName,
+          courtSchedule: newImportedNote.courtSchedule,
+        },
+        totalAmount,
+        [],
+        excelData
+      );
+      newImportedNote.id = savedImportedNote.id;
 
       // Update Local Persistent Ledger
       const existing = getFeeNotes();

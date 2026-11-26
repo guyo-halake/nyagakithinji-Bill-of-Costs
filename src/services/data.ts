@@ -816,44 +816,33 @@ export async function sendMessage(firmId: string, sender: SystemUser, recipientI
 export async function createImportedFeeNote(
   firmId: string,
   userId: string,
-  metadata: { matterTitle: string; clientName: string; claimantName?: string; respondentName?: string; judgeName?: string; forumName?: string; courtSchedule?: string },
+  metadata: { billNumber: string; matterTitle: string; clientName: string; claimantName?: string; respondentName?: string; judgeName?: string; forumName?: string; courtSchedule?: string },
   totalAmount: number,
   items: Array<{ description?: string; claimedAmount?: number }>,
   excelData?: any[]
 ) {
-  const billNumber = `BOC-IMPORT-${Date.now().toString().slice(-8)}`;
-  let recordId = `fn-imp-${Date.now()}`;
+  const { data, error } = await supabase.from('fee_notes').insert({
+    firm_id: firmId,
+    bill_number: metadata.billNumber,
+    matter_title: metadata.matterTitle,
+    client_name: metadata.claimantName || metadata.clientName,
+    court_schedule: metadata.courtSchedule || 'Schedule 6 — High Court / Arbitration',
+    grand_total: totalAmount,
+    status: 'processed',
+    generated_by_user_id: userId,
+    generated_by_user: metadata.claimantName || metadata.clientName || 'Advocate',
+  }).select('*').single();
+  if (error) throw error;
+  if (!data) throw new Error('The imported fee note was not returned after saving.');
 
-  try {
-    const { data, error } = await supabase.from('fee_notes').insert({
-      firm_id: firmId,
-      bill_number: billNumber,
-      matter_title: metadata.matterTitle,
-      client_name: metadata.claimantName || metadata.clientName,
-      court_schedule: metadata.courtSchedule || 'Schedule 6 — High Court / Arbitration',
-      grand_total: totalAmount,
-      status: 'processed',
-      generated_by_user_id: userId,
-      generated_by_user: metadata.claimantName || metadata.clientName || 'Advocate',
-    }).select('*').single();
-
-    if (!error && data) {
-      recordId = data.id;
-      if (items.length > 0) {
-        try {
-          await supabase.from('fee_note_items').insert(items.map((item, index) => ({
-            fee_note_id: data.id,
-            item_number: index + 1,
-            description: item.description || `Imported item ${index + 1}`,
-            claimed_amount: item.claimedAmount || 0,
-          })));
-        } catch (itemErr) {
-          console.warn('fee_note_items error:', itemErr);
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('Supabase remote fee_notes insert notice:', e);
+  if (items.length > 0) {
+    const { error: itemError } = await supabase.from('fee_note_items').insert(items.map((item, index) => ({
+      fee_note_id: data.id,
+      item_number: index + 1,
+      description: item.description || `Imported item ${index + 1}`,
+      claimed_amount: item.claimedAmount || 0,
+    })));
+    if (itemError) throw itemError;
   }
 
   // Auto-sync client & matter for imported fee note
@@ -862,7 +851,7 @@ export async function createImportedFeeNote(
   let linkedClientName = metadata.claimantName || metadata.clientName || 'Client';
   try {
     const syncRes = await syncMatterAndClientFromFeeNote(firmId, {
-      billNumber,
+      billNumber: metadata.billNumber,
       matterTitle: metadata.matterTitle,
       clientName: metadata.claimantName || metadata.clientName,
       claimantName: metadata.claimantName,
@@ -878,8 +867,8 @@ export async function createImportedFeeNote(
 
   // Commit to local storage ledger immediately
   const newNote: ExactFeeNoteRecord = {
-    id: recordId,
-    billNumber,
+    id: data.id,
+    billNumber: metadata.billNumber,
     matterId: linkedMatterId,
     matterTitle: linkedMatterTitle,
     clientName: linkedClientName,
@@ -902,7 +891,7 @@ export async function createImportedFeeNote(
   };
 
   const existing = getFeeNotes();
-  persistFeeNotes([newNote, ...existing.filter(n => n.billNumber !== billNumber && n.id !== recordId)]);
+  persistFeeNotes([newNote, ...existing.filter(n => n.billNumber !== metadata.billNumber && n.id !== data.id)]);
   return newNote;
 }
 
