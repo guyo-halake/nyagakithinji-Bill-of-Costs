@@ -1,0 +1,735 @@
+{
+  "student": "Guyo Razak",
+  "institution": "KCA University",
+  "programme": "Bachelor of Applied Computing",
+  "timezone": "Africa/Nairobi",
+  "source": "iPhone 'School' calendar + NAC_TRIM-3-2026_DRAFT-TT-Ver1.xlsx (sheet 'BAC FT'; exam numbers updated 26 Oct)",
+  "classes": [
+    {
+      "course": "Installation and Customization",
+      "day": "Friday",
+      "mode": "Physical (Lab)",
+      "lecturer": null,
+      "first_session": "2026-09-11",
+      "last_session": "2026-11-27",
+      "time_slots": [
+        {
+          "from": "2026-09-11",
+          "to": "2026-10-09",
+          "start": "07:00",
+          "end": "11:00",
+          "location": "TC 0-1/0-2 (Lab)"
+        },
+        {
+          "from": "2026-10-16",
+          "to": "2026-11-27",
+          "start": "10:00",
+          "end": "12:00",
+          "location": "TC 0-1/0-2 (Lab)"
+        }
+      ],
+      "unit_code": "ISS 1105",
+      "stream_options": [
+        {
+          "stream": "A",
+          "lecturer": "Jacob Ouma Oloo",
+          "venue": "TC 3RD FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "B",
+          "lecturer": "George James Kariuki",
+          "venue": "TC 3RD FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "C",
+          "lecturer": "Evans Ochieng Ongulo",
+          "venue": "TC 3RD FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "D",
+          "lecturer": "Joselyn Mutende",
+          "venue": "TC 3RD FLR",
+          "campus": "MAIN"
+        }
+      ],
+      "lecturer_note": "Lecturer depends on your stream, which isn't in your calendar. Pick your stream from stream_options.",
+      "exam": {
+        "date": "2026-12-04",
+        "day": "Friday",
+        "start": "08:00",
+        "end": "10:00",
+        "venue_by_stream": {
+          "A": "TC 3RD FLR",
+          "B": "TC 3RD FLR",
+          "C": "TC 3RD FLR",
+          "D": "TC 3RD FLR"
+        }
+      }
+    },
+    {
+      "course": "Foundations of Critical and Creative Thinking",
+      "day": "Friday",
+      "mode": "Online (Zoom)",
+      "lecturer": "Edward Odhiambo Gura",
+      "first_session": "2026-09-11",
+      "last_session": "2026-11-27",
+      "time_slots": [
+        {
+          "from": "2026-09-11",
+          "to": "2026-10-09",
+          "start": "11:00",
+          "end": "14:00",
+          "location": "Zoom"
+        },
+        {
+          "from": "2026-10-16",
+          "to": "2026-11-27",
+          "start": "10:00",
+          "end": "12:00",
+          "location": "Zoom"
+        }
+      ],
+      "unit_code": "CUU 1202",
+      "stream_options": [
+        {
+          "stream": "A",
+          "lecturer": "Edward Odhiambo Gura",
+          "venue": "TENT",
+          "campus": "MAIN"
+        }
+      ],
+      "lecturer_note": "Only one stream listed in the BAC FT timetable.",
+      "exam": {
+        "date": "2026-12-04",
+        "day": "Friday",
+        "start": "11:00",
+        "end": "13:00",
+        "venue_by_stream": {
+          "A": "TENT"
+        }
+      }
+    },
+    {
+      "course": "Health Awareness and Life Skills",
+      "day": "Monday",
+      "mode": "Online (Zoom)",
+      "lecturer": "John Kennedy Kinyua",
+      "first_session": "2026-09-14",
+      "last_session": "2026-11-30",
+      "time_slots": [
+        {
+          "from": "2026-09-14",
+          "to": "2026-10-05",
+          "start": "08:00",
+          "end": "11:00",
+          "location": "Zoom"
+        },
+        {
+          "from": "2026-10-12",
+          "to": "2026-10-12",
+          "start": "07:00",
+          "end": "09:00",
+          "location": "Zoom"
+        },
+        {
+          "from": "2026-10-19",
+          "to": "2026-11-30",
+          "start": "07:00",
+          "end": "10:00",
+          "location": "Zoom"
+        }
+      ],
+      "unit_code": "CUU 1201",
+      "stream_options": [
+        {
+          "stream": "A",
+          "lecturer": "John Kennedy Kinyua",
+          "venue": "TC 4TH FLR",
+          "campus": "MAIN"
+        }
+      ],
+      "lecturer_note": "Only one stream listed in the BAC FT timetable.",
+      "exam": {
+        "date": "2026-11-30",
+        "day": "Monday",
+        "start": "08:00",
+        "end": "10:00",
+        "venue_by_stream": {
+          "A": "TC 4TH FLR"
+        }
+      }
+    },
+    {
+      "course": "Discrete Mathematics",
+      "day": "Monday",
+      "mode": "Physical",
+      "lecturer": null,
+      "first_session": "2026-09-14",
+      "last_session": "2026-11-30",
+      "time_slots": [
+        {
+          "from": "2026-09-14",
+          "to": "2026-10-05",
+          "start": "14:00",
+          "end": "17:00",
+          "location": "LT 2-4"
+        },
+        {
+          "from": "2026-10-12",
+          "to": "2026-10-12",
+          "start": "16:00",
+          "end": "19:00",
+          "location": "LT 2-4"
+        },
+        {
+          "from": "2026-10-19",
+          "to": "2026-11-30",
+          "start": "16:00",
+          "end": "18:00",
+          "location": "LT 2-4"
+        }
+      ],
+      "unit_code": "MAT 1105",
+      "stream_options": [
+        {
+          "stream": "B",
+          "lecturer": "Edward Richard Onyango",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "C",
+          "lecturer": "Pius Nderitu Kihara",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "D",
+          "lecturer": "Mike Erick Wafula",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "E",
+          "lecturer": "Dennis Kinoti Gikunda",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "G",
+          "lecturer": "David Kipngetich Chepkonga",
+          "venue": "STUDENT CENTRE",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "H",
+          "lecturer": "Nancy Matendechere Imbusi",
+          "venue": "STUDENT CENTRE",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "I",
+          "lecturer": "Milkah Wairimu Njuguna",
+          "venue": "LT 2ND FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "J",
+          "lecturer": "Edward Richard Onyango",
+          "venue": "LT 2ND FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "K",
+          "lecturer": "Edward Richard Onyango",
+          "venue": "TC 2-2",
+          "campus": "MAIN"
+        }
+      ],
+      "lecturer_note": "Lecturer depends on your stream, which isn't in your calendar. Pick your stream from stream_options.",
+      "exam": {
+        "date": "2026-11-30",
+        "day": "Monday",
+        "start": "14:00",
+        "end": "16:00",
+        "venue_by_stream": {
+          "B": "TENT",
+          "C": "TENT",
+          "D": "TENT",
+          "E": "TENT",
+          "G": "STUDENT CENTRE",
+          "H": "STUDENT CENTRE",
+          "I": "LT 2ND FLR",
+          "J": "LT 2ND FLR",
+          "K": "TC 2-2"
+        }
+      }
+    },
+    {
+      "course": "Probability and Statistics I",
+      "day": "Tuesday",
+      "mode": "Physical",
+      "lecturer": null,
+      "first_session": "2026-09-15",
+      "last_session": "2026-12-01",
+      "time_slots": [
+        {
+          "from": "2026-09-15",
+          "to": "2026-10-06",
+          "start": "08:00",
+          "end": "11:00",
+          "location": "TC 2-8"
+        },
+        {
+          "from": "2026-10-13",
+          "to": "2026-10-13",
+          "start": "07:00",
+          "end": "10:00",
+          "location": "TC 2-8"
+        },
+        {
+          "from": "2026-10-20",
+          "to": "2026-12-01",
+          "start": "07:00",
+          "end": "10:00",
+          "location": "TC 2-8"
+        }
+      ],
+      "unit_code": "STA 1201",
+      "stream_options": [
+        {
+          "stream": "A",
+          "lecturer": "Kithaka Mutegi",
+          "venue": "Main Hall GF",
+          "campus": "TOWN"
+        },
+        {
+          "stream": "B",
+          "lecturer": "Irene Mundia",
+          "venue": "TC 3RD FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "E",
+          "lecturer": "Argan Okumu Wekesa",
+          "venue": "TC 3RD FLR",
+          "campus": "MAIN"
+        }
+      ],
+      "lecturer_note": "Lecturer depends on your stream, which isn't in your calendar. Pick your stream from stream_options.",
+      "exam": {
+        "date": "2026-12-08",
+        "day": "Tuesday",
+        "start": "14:00",
+        "end": "16:00",
+        "venue_by_stream": {
+          "A": "Main Hall GF",
+          "B": "TC 3RD FLR",
+          "E": "TC 3RD FLR"
+        }
+      }
+    },
+    {
+      "course": "Fundamentals of Computer Systems",
+      "day": "Tuesday",
+      "mode": "Lab, then Online",
+      "lecturer": null,
+      "first_session": "2026-09-15",
+      "last_session": "2026-12-01",
+      "time_slots": [
+        {
+          "from": "2026-09-15",
+          "to": "2026-10-06",
+          "start": "11:00",
+          "end": "14:00",
+          "location": "TC 0-5/0-6 (Lab)"
+        },
+        {
+          "from": "2026-10-13",
+          "to": "2026-10-13",
+          "start": "07:00",
+          "end": "10:00",
+          "location": "Online"
+        },
+        {
+          "from": "2026-10-20",
+          "to": "2026-12-01",
+          "start": "07:00",
+          "end": "09:00",
+          "location": "Online"
+        }
+      ],
+      "unit_code": "CUU 1102",
+      "stream_options": [
+        {
+          "stream": "AA",
+          "lecturer": "Norah Njoki Nyaga",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "AB",
+          "lecturer": "Godfrey Omondi Ochola",
+          "venue": "LT 2ND FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "AC",
+          "lecturer": "Kevin Mugoye Sindu",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "AD",
+          "lecturer": "Kevin Mugoye Sindu",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "AE",
+          "lecturer": "Kevin Mugoye Sindu",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "AF",
+          "lecturer": "Kevin Mugoye Sindu",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "AG",
+          "lecturer": "Kevin Mugoye Sindu",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "AH",
+          "lecturer": "Kevin Mugoye Sindu",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "C",
+          "lecturer": "Geoffrey Okinyi Rumbe",
+          "venue": "ROOM 2-1 to 2-4",
+          "campus": "TOWN"
+        },
+        {
+          "stream": "D",
+          "lecturer": "Sarah Atieno Osida",
+          "venue": "STUDENT CENTRE",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "I",
+          "lecturer": "John Kimani Wainaina",
+          "venue": "TC 3RD FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "J",
+          "lecturer": "John Ongoro Sagimo",
+          "venue": "TC 4TH FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "N",
+          "lecturer": "Sarah Atieno Osida",
+          "venue": "STUDENT CENTRE",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "P",
+          "lecturer": "Fredrick Odhiambo Ochieng",
+          "venue": "AMPHITHEATRE",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "Q",
+          "lecturer": "Stephen Magu Waweru",
+          "venue": "AMPHITHEATRE",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "R",
+          "lecturer": "John Ongoro Sagimo",
+          "venue": "AMPHITHEATRE",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "S",
+          "lecturer": "Rebecca Wangui Munuhe",
+          "venue": "LT 2ND FLR",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "T",
+          "lecturer": "Daisy Oindi Kemunto",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "U",
+          "lecturer": "Linus Alwal Aloo",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "V",
+          "lecturer": "Godfrey Omondi Ochola",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "W",
+          "lecturer": "George James Kariuki",
+          "venue": "TC 2-2",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "X",
+          "lecturer": "Joselyn Mutende",
+          "venue": "TC 2-2",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "Y",
+          "lecturer": "Godrick Felix Ochieng",
+          "venue": "TENT",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "Z",
+          "lecturer": "Nicodemus Aketch Ishmael",
+          "venue": "TENT",
+          "campus": "MAIN"
+        }
+      ],
+      "lecturer_note": "Lecturer depends on your stream, which isn't in your calendar. Pick your stream from stream_options.",
+      "exam": {
+        "date": "2026-12-01",
+        "day": "Tuesday",
+        "start": "08:00",
+        "end": "10:00",
+        "venue_by_stream": {
+          "AA": "TENT",
+          "AB": "LT 2ND FLR",
+          "AC": "TENT",
+          "AD": "TENT",
+          "AE": "TENT",
+          "AF": "TENT",
+          "AG": "TENT",
+          "AH": "TENT",
+          "C": "ROOM 2-1 to 2-4",
+          "D": "STUDENT CENTRE",
+          "I": "TC 3RD FLR",
+          "J": "TC 4TH FLR",
+          "N": "STUDENT CENTRE",
+          "P": "AMPHITHEATRE",
+          "Q": "AMPHITHEATRE",
+          "R": "AMPHITHEATRE",
+          "S": "LT 2ND FLR",
+          "T": "TENT",
+          "U": "TENT",
+          "V": "TENT",
+          "W": "TC 2-2",
+          "X": "TC 2-2",
+          "Y": "TENT",
+          "Z": "TENT"
+        }
+      }
+    },
+    {
+      "course": "Management Information Systems",
+      "day": "Wednesday",
+      "mode": "Online (Zoom)",
+      "lecturer": null,
+      "first_session": "2026-09-16",
+      "last_session": "2026-12-02",
+      "time_slots": [
+        {
+          "from": "2026-09-16",
+          "to": "2026-10-07",
+          "start": "14:00",
+          "end": "17:00",
+          "location": "Zoom"
+        },
+        {
+          "from": "2026-10-14",
+          "to": "2026-12-02",
+          "start": "13:00",
+          "end": "15:00",
+          "location": "Zoom"
+        }
+      ],
+      "unit_code": "ISS 2101",
+      "stream_options": [
+        {
+          "stream": "A",
+          "lecturer": "Catherine Wanjiku Gachiri",
+          "venue": "BLOCK C HALL",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "B",
+          "lecturer": "Alfred Owino Ondiek",
+          "venue": "BLOCK C HALL",
+          "campus": "MAIN"
+        },
+        {
+          "stream": "C",
+          "lecturer": "Anne Wambui Maina",
+          "venue": "Main Hall GF",
+          "campus": "TOWN"
+        }
+      ],
+      "lecturer_note": "Lecturer depends on your stream, which isn't in your calendar. Pick your stream from stream_options.",
+      "exam": {
+        "date": "2026-12-09",
+        "day": "Wednesday",
+        "start": "14:00",
+        "end": "16:00",
+        "venue_by_stream": {
+          "A": "BLOCK C HALL",
+          "B": "BLOCK C HALL",
+          "C": "Main Hall GF"
+        }
+      }
+    }
+  ],
+  "exams": [
+    {
+      "unit_code": "CUU 1201",
+      "course": "Health Awareness and Life Skills",
+      "date": "2026-11-30",
+      "day": "Monday",
+      "start": "08:00",
+      "end": "10:00",
+      "venue_by_stream": {
+        "A": "TC 4TH FLR"
+      },
+      "lecturer": "John Kennedy Kinyua"
+    },
+    {
+      "unit_code": "MAT 1105",
+      "course": "Discrete Mathematics",
+      "date": "2026-11-30",
+      "day": "Monday",
+      "start": "14:00",
+      "end": "16:00",
+      "venue_by_stream": {
+        "B": "TENT",
+        "C": "TENT",
+        "D": "TENT",
+        "E": "TENT",
+        "G": "STUDENT CENTRE",
+        "H": "STUDENT CENTRE",
+        "I": "LT 2ND FLR",
+        "J": "LT 2ND FLR",
+        "K": "TC 2-2"
+      },
+      "lecturer": null
+    },
+    {
+      "unit_code": "CUU 1102",
+      "course": "Fundamentals of Computer Systems",
+      "date": "2026-12-01",
+      "day": "Tuesday",
+      "start": "08:00",
+      "end": "10:00",
+      "venue_by_stream": {
+        "AA": "TENT",
+        "AB": "LT 2ND FLR",
+        "AC": "TENT",
+        "AD": "TENT",
+        "AE": "TENT",
+        "AF": "TENT",
+        "AG": "TENT",
+        "AH": "TENT",
+        "C": "ROOM 2-1 to 2-4",
+        "D": "STUDENT CENTRE",
+        "I": "TC 3RD FLR",
+        "J": "TC 4TH FLR",
+        "N": "STUDENT CENTRE",
+        "P": "AMPHITHEATRE",
+        "Q": "AMPHITHEATRE",
+        "R": "AMPHITHEATRE",
+        "S": "LT 2ND FLR",
+        "T": "TENT",
+        "U": "TENT",
+        "V": "TENT",
+        "W": "TC 2-2",
+        "X": "TC 2-2",
+        "Y": "TENT",
+        "Z": "TENT"
+      },
+      "lecturer": null
+    },
+    {
+      "unit_code": "ISS 1105",
+      "course": "Installation and Customization",
+      "date": "2026-12-04",
+      "day": "Friday",
+      "start": "08:00",
+      "end": "10:00",
+      "venue_by_stream": {
+        "A": "TC 3RD FLR",
+        "B": "TC 3RD FLR",
+        "C": "TC 3RD FLR",
+        "D": "TC 3RD FLR"
+      },
+      "lecturer": null
+    },
+    {
+      "unit_code": "CUU 1202",
+      "course": "Foundations of Critical and Creative Thinking",
+      "date": "2026-12-04",
+      "day": "Friday",
+      "start": "11:00",
+      "end": "13:00",
+      "venue_by_stream": {
+        "A": "TENT"
+      },
+      "lecturer": "Edward Odhiambo Gura"
+    },
+    {
+      "unit_code": "STA 1201",
+      "course": "Probability and Statistics I",
+      "date": "2026-12-08",
+      "day": "Tuesday",
+      "start": "14:00",
+      "end": "16:00",
+      "venue_by_stream": {
+        "A": "Main Hall GF",
+        "B": "TC 3RD FLR",
+        "E": "TC 3RD FLR"
+      },
+      "lecturer": null
+    },
+    {
+      "unit_code": "ISS 2101",
+      "course": "Management Information Systems",
+      "date": "2026-12-09",
+      "day": "Wednesday",
+      "start": "14:00",
+      "end": "16:00",
+      "venue_by_stream": {
+        "A": "BLOCK C HALL",
+        "B": "BLOCK C HALL",
+        "C": "Main Hall GF"
+      },
+      "lecturer": null
+    }
+  ],
+  "notes": [
+    "Exam timetable is marked DRAFT (Ver1); confirm with KCA before relying on it.",
+    "Exam times/venues come from the spreadsheet; lecturers are per stream and your stream isn't recorded anywhere, so only single-stream units have a lecturer filled in.",
+    "Class times changed from the week of 2026-10-12; both phases are in time_slots.",
+    "No classes on 2026-10-10 and 2026-10-20 (public holidays)."
+  ],
+  "programme_code": "KCABAC (BAC FT, assumed full-time)"
+}

@@ -24,75 +24,28 @@ export function formatTimeAgo(timestamp: number): string {
   return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
 }
 
-const INITIAL_LOGS: ActivityLogItem[] = [
-  {
-    id: 'log-1',
-    advocateName: 'Guyo Halake',
-    advocateRole: 'Managing Partner',
-    action: 'authenticated & accessed Executive Oversight Docket',
-    timeAgo: 'Just now',
-    timestamp: Date.now() - 2 * 60 * 1000,
-    type: 'login',
-    badgeColor: 'bg-blue-500'
-  },
-  {
-    id: 'log-2',
-    advocateName: 'Karani Victor',
-    advocateRole: 'Senior Partner',
-    action: 'calculated & approved BOC-2026-SEYANI-001 (KES 30,820,193.28)',
-    timeAgo: '15 mins ago',
-    timestamp: Date.now() - 15 * 60 * 1000,
-    type: 'feenote',
-    badgeColor: 'bg-emerald-500'
-  },
-  {
-    id: 'log-3',
-    advocateName: 'Nyagah Kithinji',
-    advocateRole: 'Senior Counsel',
-    action: 'filed Party & Party Bill of Costs for HCCOMM E547/2024 (KES 405,594.00)',
-    timeAgo: '45 mins ago',
-    timestamp: Date.now() - 45 * 60 * 1000,
-    type: 'approval',
-    badgeColor: 'bg-amber-500'
-  },
-  {
-    id: 'log-4',
-    advocateName: 'Razak Wako',
-    advocateRole: 'Lead Developer',
-    action: 'synchronized legal vault spreadsheet: 14.01.2026 - Bill of Costs - Dhanya v Sunil.xlsx',
-    timeAgo: '2 hours ago',
-    timestamp: Date.now() - 2 * 3600 * 1000,
-    type: 'vault',
-    badgeColor: 'bg-purple-500'
-  },
-  {
-    id: 'log-5',
-    advocateName: 'Karani Victor',
-    advocateRole: 'Senior Partner',
-    action: 'verified Schedule 6 ad valorem instruction fee calculation for Seyani v Greenhills',
-    timeAgo: '3 hours ago',
-    timestamp: Date.now() - 3 * 3600 * 1000,
-    type: 'approval',
-    badgeColor: 'bg-emerald-500'
-  }
-];
+const SEEDED_ACTIVITY_LOG_IDS = new Set(['log-1', 'log-2', 'log-3', 'log-4', 'log-5']);
 
 export const getActivityLogs = (): ActivityLogItem[] => {
   try {
     const saved = localStorage.getItem('SYSTEM_ACTIVITY_LOGS');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0 && !parsed.some(p => p.advocateName === 'Adv. Wanjiku')) {
-        // Refresh timeAgo dynamically
-        return parsed.map((item: ActivityLogItem) => ({
+      if (Array.isArray(parsed)) {
+        const realLogs = parsed.filter(
+          (item: ActivityLogItem) => !SEEDED_ACTIVITY_LOG_IDS.has(item.id)
+        );
+        if (realLogs.length !== parsed.length) {
+          localStorage.setItem('SYSTEM_ACTIVITY_LOGS', JSON.stringify(realLogs));
+        }
+        return realLogs.map((item: ActivityLogItem) => ({
           ...item,
           timeAgo: formatTimeAgo(item.timestamp)
         }));
       }
     }
   } catch (e) { }
-  localStorage.setItem('SYSTEM_ACTIVITY_LOGS', JSON.stringify(INITIAL_LOGS));
-  return INITIAL_LOGS;
+  return [];
 };
 
 /**

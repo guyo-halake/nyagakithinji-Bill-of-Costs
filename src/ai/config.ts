@@ -35,8 +35,8 @@ export const NYAGAH_AI_CONFIG: LegalAgentConfig = {
   // Test recipient as mandated: Use internal developer number before sending to real clients
   testPhoneNumber: "+254768141129", // Pochi la Biashara / Razak test dispatch line
   systemShortcode: "408221",
-  wahaApiUrl: process.env.WAHA_API_URL || "http://localhost:3000/api/waha",
-  n8nWebhookUrl: process.env.N8N_WEBHOOK_URL || "http://localhost:5678/webhook/nyagah-legal-agent",
+  wahaApiUrl: import.meta.env.VITE_WAHA_API_URL?.trim() || "http://localhost:5000/api/sendText",
+  n8nWebhookUrl: import.meta.env.VITE_N8N_WEBHOOK_URL?.trim() || "",
   geminiModel: "gemini-2.5-flash",
   statutoryBasis: {
     order: "Advocates (Remuneration) Order 2014",
@@ -50,4 +50,3 @@ export const NYAGAH_AI_CONFIG: LegalAgentConfig = {
     }
   }
 };
-

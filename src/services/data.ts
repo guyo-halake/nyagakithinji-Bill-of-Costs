@@ -15,6 +15,8 @@ import {
   persistClients,
   getMatters,
   persistMatters,
+  getVaultFiles,
+  persistVaultFiles,
   ExactFeeNoteRecord,
   saveUserProfile,
 } from './supabase';
@@ -23,16 +25,16 @@ const mapClient = (row: any): ExactClientRecord => ({
   id: row.id,
   name: row.name,
   company: row.company || '',
-  category: row.client_type === 'individual' ? 'Individual Client' : 'Corporate or Institutional',
+  category: row.category || (row.client_type === 'individual' ? 'Individual Client' : 'Corporate or Institutional'),
   email: row.email || '',
-  phone: row.phone_primary || row.phone || '',
-  phonePrimary: row.phone_primary || row.phone || '',
+  phone: row.phone || '',
+  phonePrimary: row.phone || '',
   phoneSecondary: row.phone_secondary || '',
   matters: 0,
   mattersList: [],
   code: row.id,
   kraPin: row.kra_pin || '',
-  contactPerson: row.contact_person || '',
+  contactPerson: row.contact_person || row.name || '',
 });
 
 const mapMatter = (row: any): ExactMatterRecord => ({
@@ -60,120 +62,98 @@ const mapMatter = (row: any): ExactMatterRecord => ({
   leadAdvocateEmail: row.lead_advocate_email || undefined,
 });
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_REGEX = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 export const isValidUuid = (val?: string | null): boolean => {
   return typeof val === 'string' && UUID_REGEX.test(val);
 };
 
-export async function fetchClients(firmId: string): Promise<ExactClientRecord[]> {
-  const local = getClients();
-  try {
-    let query = supabase.from('clients').select('*');
-    if (isValidUuid(firmId)) {
-      query = query.eq('firm_id', firmId);
-    }
-    const { data, error } = await query.order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) {
-      const cloudMapped = data.map(mapClient);
-      const merged = [...cloudMapped];
-      local.forEach(lc => {
-        if (!merged.some(m => m.id === lc.id || m.name.toLowerCase() === lc.name.toLowerCase())) {
-          merged.push(lc);
-        }
-      });
-      persistClients(merged, true);
-      return merged;
-    }
-  } catch (e) {}
-  return local;
+const requireFirmId = (firmId?: string): string => {
+  if (typeof firmId !== 'string' || !isValidUuid(firmId)) {
+    throw new Error('Your firm account could not be verified. Sign out and sign in again.');
+  }
+  return firmId;
+};
+
+export async function fetchClients(firmId?: string): Promise<ExactClientRecord[]> {
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('firm_id', activeFirmId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const clients = (data || []).map(mapClient);
+  persistClients(clients, true);
+  return clients;
 }
 
 export async function createClient(firmId: string, input: Pick<ExactClientRecord, 'name' | 'company' | 'email' | 'phonePrimary' | 'phoneSecondary' | 'category'> & { kraPin?: string; address?: string }): Promise<ExactClientRecord> {
-  let created: ExactClientRecord | null = null;
-  try {
-    const insertPayload: Record<string, any> = {
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('clients')
+    .insert({
+      firm_id: activeFirmId,
       name: input.name,
       company: input.company || null,
-      client_type: input.category === 'Individual Client' ? 'individual' : 'corporate',
-      email: input.email,
-      phone_primary: input.phonePrimary,
+      contact_person: input.name,
+      category: input.category,
+      client_type: input.category === 'Individual Client' ? 'individual' : input.category === 'Government Entity' ? 'government' : 'corporate',
+      email: input.email || null,
+      phone: input.phonePrimary || null,
       phone_secondary: input.phoneSecondary || null,
       kra_pin: input.kraPin || null,
       address: input.address || null,
-    };
-    if (isValidUuid(firmId)) {
-      insertPayload.firm_id = firmId;
-    }
-    const { data, error } = await supabase.from('clients').insert(insertPayload).select('*').single();
-    if (!error && data) created = mapClient(data);
-  } catch (e) {}
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
 
-  const newRecord: ExactClientRecord = created || {
-    id: `c-${Date.now()}`,
-    name: input.name,
-    company: input.company || '',
-    category: input.category,
-    email: input.email,
-    phone: input.phonePrimary,
-    phonePrimary: input.phonePrimary,
-    phoneSecondary: input.phoneSecondary || '',
-    matters: 0,
-    mattersList: [],
-    code: `CLI-${Date.now().toString().slice(-5)}`,
-    kraPin: input.kraPin || 'P051000000X',
-    contactPerson: input.name,
-  };
-
-  const list = getClients();
-  const filtered = list.filter(c => c.id !== newRecord.id && c.name.toLowerCase() !== newRecord.name.toLowerCase());
-  persistClients([newRecord, ...filtered]);
-  return newRecord;
+  const created = mapClient(data);
+  persistClients([created, ...getClients().filter(client => client.id !== created.id)]);
+  return created;
 }
 
 export async function deleteClient(firmId: string, clientId: string): Promise<void> {
-  try {
-    let del = supabase.from('clients').delete();
-    if (isValidUuid(firmId)) {
-      del = del.eq('firm_id', firmId);
-    }
-    await del.eq('id', clientId);
-  } catch (e) {}
-  const list = getClients();
-  const filtered = list.filter(c => c.id !== clientId);
-  persistClients(filtered);
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('clients')
+    .delete()
+    .eq('firm_id', activeFirmId)
+    .eq('id', clientId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('This client was not found or you do not have permission to delete it.');
+
+  persistClients(getClients().filter(client => client.id !== clientId));
 }
 
-export async function fetchMatters(firmId: string): Promise<ExactMatterRecord[]> {
-  const local = getMatters();
-  try {
-    let query = supabase.from('matters').select('*');
-    if (isValidUuid(firmId)) {
-      query = query.eq('firm_id', firmId);
-    }
-    const { data, error } = await query.order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) {
-      const cloudMapped = data.map(mapMatter);
-      const merged = [...cloudMapped];
-      local.forEach(lm => {
-        if (!merged.some(m => m.id === lm.id || m.title.toLowerCase() === lm.title.toLowerCase())) {
-          merged.push(lm);
-        }
-      });
-      persistMatters(merged, true);
-      return merged;
-    }
-  } catch (e) {}
-  return local;
+export async function fetchMatters(firmId?: string): Promise<ExactMatterRecord[]> {
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('matters')
+    .select('*')
+    .eq('firm_id', activeFirmId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const matters = (data || []).map(mapMatter);
+  persistMatters(matters, true);
+  return matters;
 }
 
 export async function createMatter(firmId: string, input: Partial<ExactMatterRecord>): Promise<ExactMatterRecord> {
-  let created: ExactMatterRecord | null = null;
-  try {
-    const { data, error } = await supabase.from('matters').insert({
-      firm_id: firmId,
-      title: input.title,
-      cause_number: input.caseNo || null,
-      forum: input.forum || null,
+  const activeFirmId = requireFirmId(firmId);
+  if (!input.title?.trim()) throw new Error('Enter a matter title before saving.');
+
+  const { data, error } = await supabase
+    .from('matters')
+    .insert({
+      firm_id: activeFirmId,
+      title: input.title.trim(),
+      cause_number: input.caseNo || input.ctsCaseNumber || null,
+      forum: input.forum || input.courtStation || null,
       applicant: input.applicant || null,
       applicant_role: input.applicantRole || 'Claimant',
       respondent: input.respondent || null,
@@ -181,44 +161,21 @@ export async function createMatter(firmId: string, input: Partial<ExactMatterRec
       claim_value: input.amount || 0,
       status: 'open',
       fee_note_link: input.feeNoteLink || null,
-    }).select('*').single();
-    if (!error && data) created = mapMatter(data);
-  } catch (e) {}
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
 
-  const newMatter: ExactMatterRecord = created || {
-    id: `m-${Date.now()}`,
-    title: input.title || 'Untitled Matter',
-    applicant: input.applicant || '',
-    applicantRole: input.applicantRole || 'Claimant',
-    respondent: input.respondent || '',
-    respondentRole: input.respondentRole || 'Respondent',
-    forum: input.courtStation || input.forum || 'High Court — Commercial',
-    status: input.status || 'Taxation Ready',
-    statusClass: input.statusClass || 'ready',
-    caseNo: input.ctsCaseNumber || input.caseNo || '',
-    matterNumber: input.ctsCaseNumber || input.caseNo || '',
-    filedBy: input.filedBy || '',
-    amount: input.amount || 0,
-    itemsCount: input.itemsCount || 0,
-    feeNoteLink: input.feeNoteLink || '',
-    documentLink: input.documentLink || '',
-    leadAdvocate: input.leadAdvocate || '',
-    ctsCaseNumber: input.ctsCaseNumber || input.caseNo || '',
-    courtStation: input.courtStation || input.forum || '',
-    hearingDate: input.hearingDate,
-    courtActionRequired: input.courtActionRequired,
-    leadAdvocateEmail: input.leadAdvocateEmail,
-  };
-
-  const list = getMatters();
-  const filtered = list.filter(m => m.id !== newMatter.id && m.title.toLowerCase() !== newMatter.title.toLowerCase());
-  persistMatters([newMatter, ...filtered]);
-  return newMatter;
+  const created = mapMatter(data);
+  persistMatters([created, ...getMatters().filter(matter => matter.id !== created.id)]);
+  return created;
 }
 
 export async function updateMatter(firmId: string, matterId: string, input: Partial<ExactMatterRecord>): Promise<ExactMatterRecord> {
-  try {
-    const { data, error } = await supabase.from('matters').update({
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('matters')
+    .update({
       title: input.title,
       cause_number: input.caseNo,
       forum: input.forum,
@@ -228,32 +185,31 @@ export async function updateMatter(firmId: string, matterId: string, input: Part
       respondent_role: input.respondentRole,
       claim_value: input.amount,
       fee_note_link: input.feeNoteLink,
-    }).eq('firm_id', firmId).eq('id', matterId).select('*').single();
-    if (!error && data) {
-      const updated = mapMatter(data);
-      const list = getMatters().map(m => m.id === matterId ? updated : m);
-      persistMatters(list);
-      return updated;
-    }
-  } catch (e) {}
+    })
+    .eq('firm_id', activeFirmId)
+    .eq('id', matterId)
+    .select('*')
+    .single();
+  if (error) throw error;
 
-  const list = getMatters();
-  const idx = list.findIndex(m => m.id === matterId);
-  if (idx !== -1) {
-    list[idx] = { ...list[idx], ...input };
-    persistMatters([...list]);
-    return list[idx];
-  }
-  return input as ExactMatterRecord;
+  const updated = mapMatter(data);
+  persistMatters(getMatters().map(matter => matter.id === matterId ? updated : matter));
+  return updated;
 }
 
 export async function deleteMatter(firmId: string, matterId: string): Promise<void> {
-  try {
-    await supabase.from('matters').delete().eq('firm_id', firmId).eq('id', matterId);
-  } catch (e) {}
-  const list = getMatters();
-  const filtered = list.filter(m => m.id !== matterId);
-  persistMatters(filtered);
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('matters')
+    .delete()
+    .eq('firm_id', activeFirmId)
+    .eq('id', matterId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('This matter was not found or you do not have permission to delete it.');
+
+  persistMatters(getMatters().filter(matter => matter.id !== matterId));
 }
 
 // -----------------------------------------------------------------------------
@@ -292,12 +248,14 @@ export async function syncMatterAndClientFromFeeNote(
   input: FeeNoteSyncInput,
   currentUser?: SystemUser | null
 ): Promise<FeeNoteSyncResult> {
-  const currentClients = [...getClients()];
-  const currentMatters = [...getMatters()];
+  const activeFirmId = requireFirmId(firmId);
+  const currentClients = await fetchClients(activeFirmId);
+  const currentMatters = await fetchMatters(activeFirmId);
 
   // 1. Resolve & Auto-Create Client
   const rawClient = (input.clientName || input.claimantName || '').trim();
-  const clientName = rawClient && rawClient.toLowerCase() !== 'client' ? rawClient : 'Valued Client';
+  const clientName = rawClient && rawClient.toLowerCase() !== 'client' ? rawClient : '';
+  if (!clientName) throw new Error('Enter a client name before saving this fee note.');
 
   let client = currentClients.find(c => 
     c.name.trim().toLowerCase() === clientName.toLowerCase() ||
@@ -309,40 +267,15 @@ export async function syncMatterAndClientFromFeeNote(
   if (!client) {
     isNewClient = true;
     const isCorp = /ltd|limited|plc|llc|corp|corporation|bank|sacco|group|holdings|enterprises|company|co\./i.test(clientName);
-    const newClientId = `cli-${Date.now()}`;
-    const codeSlug = clientName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase() || 'CLI';
-    client = {
-      id: newClientId,
+    client = await createClient(activeFirmId, {
       name: clientName,
       company: isCorp ? clientName : '',
       category: isCorp ? 'Corporate or Institutional' : 'Individual Client',
-      email: input.clientEmail || `${clientName.toLowerCase().replace(/[^a-z0-9]/g, '')}@client.local`,
-      phone: input.clientPhone || '+254 700 000 000',
-      phonePrimary: input.clientPhone || '+254 700 000 000',
+      email: input.clientEmail || '',
+      phonePrimary: input.clientPhone || '',
       phoneSecondary: '',
-      matters: 1,
-      mattersList: [],
-      code: `CLI-${codeSlug}-${Date.now().toString().slice(-4)}`,
-      kraPin: 'P051000000X',
-      contactPerson: clientName,
-      activeMattersCount: 1,
-      totalBilledAmount: input.grandTotal || 0,
-    };
+    });
     currentClients.unshift(client);
-    persistClients(currentClients);
-
-    try {
-      await supabase.from('clients').insert({
-        id: client.id,
-        firm_id: firmId,
-        name: client.name,
-        company: client.company || null,
-        client_type: isCorp ? 'corporate' : 'individual',
-        email: client.email || null,
-        phone_primary: client.phonePrimary || null,
-        kra_pin: client.kraPin || null,
-      });
-    } catch (e) {}
   } else {
     client.totalBilledAmount = (client.totalBilledAmount || 0) + (input.grandTotal || 0);
   }
@@ -367,52 +300,25 @@ export async function syncMatterAndClientFromFeeNote(
   let isNewMatter = false;
   if (!matter) {
     isNewMatter = true;
-    const newMatterId = `m-${Date.now()}`;
-    const generatedCaseNo = input.caseNo?.trim() || `HCCC E${Date.now().toString().slice(-4)}/${new Date().getFullYear()}`;
-    matter = {
-      id: newMatterId,
+    matter = await createMatter(activeFirmId, {
       title: matterTitle,
       applicant: input.claimantName || clientName,
       applicantRole: input.isDefendant ? 'Defendant' : 'Claimant',
-      respondent: input.respondentName || 'Opposing Party',
+      respondent: input.respondentName || '',
       respondentRole: input.isDefendant ? 'Claimant' : 'Respondent',
-      forum: input.forumName?.split('\n')[0] || 'High Court — Commercial',
-      status: 'Taxation Ready',
-      statusClass: 'ready',
-      caseNo: generatedCaseNo,
-      matterNumber: generatedCaseNo,
-      filedBy: `Nyagah B. Kithinji & Co. Advocates — for ${input.isDefendant ? 'Defendants' : 'Claimant'}`,
+      forum: input.forumName?.split('\n')[0] || '',
+      caseNo: input.caseNo?.trim() || '',
       amount: Number(input.claimValue || input.grandTotal || 0),
-      itemsCount: 1,
       feeNoteLink: input.billNumber,
-      documentLink: `${input.billNumber}.pdf`,
-      leadAdvocate: currentUser?.fullName || 'Guyo Halake',
-    };
+      leadAdvocate: currentUser?.fullName || '',
+    });
     currentMatters.unshift(matter);
-    persistMatters(currentMatters);
-
-    try {
-      await supabase.from('matters').insert({
-        id: matter.id,
-        firm_id: firmId,
-        title: matter.title,
-        cause_number: matter.caseNo,
-        forum: matter.forum,
-        applicant: matter.applicant,
-        applicant_role: matter.applicantRole,
-        respondent: matter.respondent,
-        respondent_role: matter.respondentRole,
-        claim_value: matter.amount,
-        status: 'open',
-        fee_note_link: input.billNumber,
-      });
-    } catch (e) {}
   } else {
-    matter.feeNoteLink = input.billNumber;
-    if ((!matter.amount || matter.amount === 0) && input.claimValue) {
-      matter.amount = input.claimValue;
-    }
-    persistMatters(currentMatters);
+    matter = await updateMatter(activeFirmId, matter.id, {
+      ...matter,
+      feeNoteLink: input.billNumber,
+      amount: matter.amount || input.claimValue || matter.amount,
+    });
   }
 
   // Ensure client's mattersList contains this matter
@@ -454,14 +360,18 @@ const mapDocument = (row: any): ExactVaultFileRecord => ({
   verifiedTruth: true,
 });
 
-export async function fetchDocuments(firmId: string): Promise<ExactVaultFileRecord[]> {
-  try {
-    const { data, error } = await supabase.from('documents').select('*, matters(title, clients(name))').eq('firm_id', firmId).order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) {
-      return data.map(mapDocument);
-    }
-  } catch (e) {}
-  return EXACT_VAULT_FILES;
+export async function fetchDocuments(firmId?: string): Promise<ExactVaultFileRecord[]> {
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('documents')
+    .select('*, matters(title, clients(name))')
+    .eq('firm_id', activeFirmId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const documents = (data || []).map(mapDocument);
+  persistVaultFiles(documents, true);
+  return documents;
 }
 
 export async function uploadDocument(firmId: string, userId: string, file: File, matterId?: string): Promise<ExactVaultFileRecord> {
@@ -493,11 +403,20 @@ export async function createDocumentDownloadUrl(storagePath: string): Promise<st
   return data.signedUrl;
 }
 
-export async function deleteDocument(firmId: string, documentId: string, storagePath: string): Promise<void> {
-  const { error: storageError } = await supabase.storage.from('legal-vault').remove([storagePath]);
-  if (storageError) throw storageError;
-  const { error } = await supabase.from('documents').delete().eq('firm_id', firmId).eq('id', documentId);
-  if (error) throw error;
+export async function deleteDocument(firmId?: string, documentId?: string, storagePath?: string): Promise<void> {
+  try {
+    if (storagePath) {
+      await supabase.storage.from('legal-vault').remove([storagePath]);
+    }
+  } catch (e) {}
+  try {
+    if (isValidUuid(firmId) && documentId) {
+      await supabase.from('documents').delete().eq('firm_id', firmId).eq('id', documentId);
+    }
+  } catch (e) {}
+  const list = getVaultFiles();
+  const filtered = list.filter(f => f.id !== documentId && f.path !== storagePath);
+  persistVaultFiles(filtered);
 }
 
 export interface FirmMessage {
@@ -539,123 +458,73 @@ export function isUserRecordDeleted(u: any, deletedKeys: Set<string>): boolean {
   );
 }
 
-export async function fetchFirmUsers(firmId: string = 'firm-001'): Promise<SystemUser[]> {
-  const deletedKeys = getDeletedUserKeys();
+export async function fetchFirmUsers(firmId?: string): Promise<SystemUser[]> {
+  const activeFirmId = requireFirmId(firmId);
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('firm_id', activeFirmId)
+    .eq('is_active', true)
+    .order('full_name');
+  if (error) throw error;
 
-  // Also sync deleted keys from backend persistent store if accessible
-  try {
-    const delRes = await fetch('/api/v1/users/deleted-keys');
-    if (delRes.ok) {
-      const delData = await delRes.json();
-      if (Array.isArray(delData?.deleted_keys)) {
-        delData.deleted_keys.forEach((k: string) => {
-          if (k) deletedKeys.add(k.trim().toLowerCase());
-        });
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('DELETED_USER_KEYS', JSON.stringify(Array.from(deletedKeys)));
-        }
-      }
-    }
-  } catch (e) {}
+  const result: SystemUser[] = (data || []).map((row: any) => ({
+    id: row.id,
+    authUserId: row.auth_user_id || undefined,
+    firmId: activeFirmId,
+    fullName: row.full_name,
+    username: row.username || '',
+    lastSignInAt: row.last_sign_in_at || undefined,
+    advocateTitle: (row.full_name || '').replace(/^Adv\.?\s*/i, ''),
+    lskNo: row.lsk_no || '',
+    role: row.role === 'admin' ? 'Admin' : row.role === 'developer' ? 'Developer' : 'Advocate',
+    position: row.position || row.role,
+    department: row.department || '',
+    workEmail: row.email,
+    personalEmail: row.email,
+    phonePrimary: row.phone_primary || '',
+    phoneSecondary: row.phone_secondary || '',
+    hasAllPermissions: row.role === 'admin' || row.role === 'developer',
+    passwordHash: '',
+    avatarUrl: row.avatar_url || undefined,
+  }));
 
-  const mergedMap = new Map<string, SystemUser>();
-  let databaseFoundUsers = false;
-
-  // 1. Fetch from authoritative backend persistent engine (/api/v1/users)
-  try {
-    const res = await fetch('/api/v1/users');
-    if (res.ok) {
-      const data = await res.json();
-      if (data && Array.isArray(data.users) && data.users.length > 0) {
-        databaseFoundUsers = true;
-        data.users.forEach((u: any) => {
-          if (isUserRecordDeleted(u, deletedKeys)) return;
-          const mapped: SystemUser = {
-            id: u.id,
-            fullName: u.fullName,
-            username: u.username || u.workEmail?.split('@')[0],
-            advocateTitle: (u.advocateTitle || u.fullName || '').replace(/^Adv\.?\s*/i, ''),
-            lskNo: u.lskNo || '',
-            role: u.role || 'Advocate',
-            position: u.position || 'Advocate',
-            department: u.department || '',
-            workEmail: u.workEmail,
-            personalEmail: u.personalEmail || u.workEmail,
-            phonePrimary: u.phonePrimary || '',
-            phoneSecondary: u.phoneSecondary || '',
-            avatarUrl: u.avatarUrl || undefined,
-            hasAllPermissions: u.hasAllPermissions || u.role === 'Admin' || u.role === 'Developer',
-            passwordHash: u.passwordHash || 'Nyagah@2026',
-            firmId: u.firmId || firmId
-          };
-          mergedMap.set(mapped.id, mapped);
-        });
-      }
-    }
-  } catch (e) {}
-
-  // 2. Fetch from Supabase users table if accessible
-  try {
-    const { data, error } = await supabase.from('users').select('*').order('full_name');
-    if (!error && data && data.length > 0) {
-      databaseFoundUsers = true;
-      data.forEach((row: any) => {
-        if (isUserRecordDeleted(row, deletedKeys)) return;
-        const existing = mergedMap.get(row.id) || Array.from(mergedMap.values()).find(u => u.workEmail?.toLowerCase() === (row.email || '').toLowerCase());
-        const dbUser: SystemUser = {
-          id: row.id,
-          authUserId: row.auth_user_id || undefined,
-          firmId: row.firm_id || firmId,
-          fullName: row.full_name,
-          username: row.username || (row.email || '').split('@')[0],
-          advocateTitle: (row.full_name || '').replace(/^Adv\.?\s*/i, ''),
-          lskNo: row.lsk_no || '',
-          role: row.role === 'admin' ? 'Admin' : row.role === 'developer' ? 'Developer' : 'Advocate',
-          position: row.position || row.role,
-          workEmail: row.email,
-          personalEmail: row.email,
-          phonePrimary: row.phone_primary || '',
-          phoneSecondary: row.phone_secondary || '',
-          hasAllPermissions: row.role === 'admin' || row.role === 'developer',
-          passwordHash: existing?.passwordHash || row.password_hash || '',
-          avatarUrl: row.avatar_url || undefined,
-        };
-        mergedMap.set(dbUser.id, dbUser);
-      });
-    }
-  } catch (e) {}
-
-  // 3. Fallback only if database is completely offline/empty AND localStorage is empty
-  if (!databaseFoundUsers) {
-    const stored = typeof window !== 'undefined' ? localStorage.getItem('EXACT_USERS') : null;
-    let localUsers: SystemUser[] = stored ? JSON.parse(stored) : [];
-    const obsoleteIds = new Set(['usr-faith-chebet', 'usr-brian-omondi', 'usr-mercy-wanjiku', 'usr-kevin-mutua', 'usr-karani-admin']);
-    localUsers = localUsers.filter(u => !obsoleteIds.has(u.id) && !isUserRecordDeleted(u, deletedKeys));
-
-    if (localUsers.length === 0) {
-      SEEDED_USERS.forEach(su => {
-        if (!isUserRecordDeleted(su, deletedKeys)) {
-          localUsers.push(su);
-        }
-      });
-    }
-
-    localUsers.forEach(u => mergedMap.set(u.id, u));
-  }
-
-  // Synchronize cleaned-up deletedKeys back to storage
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('DELETED_USER_KEYS', JSON.stringify(Array.from(deletedKeys)));
-    } catch (e) {}
-  }
-
-  // Return all active persistent users and save cache
-  const result = Array.from(mergedMap.values());
   try {
     localStorage.setItem('EXACT_USERS', JSON.stringify(result));
   } catch (e) {}
   return result;
+}
+
+export async function createFirmLogin(
+  input: { fullName: string; email: string; username: string; password: string; role: 'Admin' | 'Advocate' },
+): Promise<SystemUser> {
+  const { data, error } = await supabase.functions.invoke('create-firm-user', {
+    body: input,
+  });
+  if (error) throw new Error(error.message || 'Could not create the user account.');
+  if (!data?.user?.id || !data.user?.firm_id) {
+    throw new Error('The account service returned an incomplete user profile.');
+  }
+
+  const row = data.user;
+  return {
+    id: row.id,
+    authUserId: row.auth_user_id || undefined,
+    firmId: row.firm_id,
+    fullName: row.full_name,
+    username: row.username || input.username,
+    lastSignInAt: row.last_sign_in_at || undefined,
+    advocateTitle: row.advocate_title || row.full_name,
+    lskNo: row.lsk_no || '',
+    role: row.role === 'admin' ? 'Admin' : 'Advocate',
+    position: row.position || row.role,
+    workEmail: row.email,
+    personalEmail: row.email,
+    phonePrimary: row.phone_primary || '',
+    phoneSecondary: row.phone_secondary || '',
+    hasAllPermissions: row.role === 'admin',
+    passwordHash: '',
+  };
 }
 
 export async function createFirmUser(firmId: string, user: Partial<SystemUser>): Promise<SystemUser> {

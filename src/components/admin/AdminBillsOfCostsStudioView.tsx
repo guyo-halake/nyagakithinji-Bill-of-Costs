@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Scale, FileText, Download, Upload, Plus, Trash2, 
   Printer, CheckCircle2, Search, RefreshCw, Calculator, 
@@ -31,9 +31,12 @@ export interface TaxationMatter {
 
 interface AdminBillsOfCostsStudioViewProps {
   showToast: (msg: string) => void;
+  requestedAction?: { type: 'import' | 'export' | 'print'; id: number } | null;
+  onActionHandled?: () => void;
 }
 
-export const AdminBillsOfCostsStudioView: React.FC<AdminBillsOfCostsStudioViewProps> = ({ showToast }) => {
+export const AdminBillsOfCostsStudioView: React.FC<AdminBillsOfCostsStudioViewProps> = ({ showToast, requestedAction, onActionHandled }) => {
+  const importInputRef = useRef<HTMLInputElement>(null);
   // Preloaded Real Firm Matters from files/
   const [matters, setMatters] = useState<TaxationMatter[]>([
     {
@@ -503,6 +506,14 @@ export const AdminBillsOfCostsStudioView: React.FC<AdminBillsOfCostsStudioViewPr
     return true;
   });
 
+  useEffect(() => {
+    if (!requestedAction) return;
+    if (requestedAction.type === 'import') importInputRef.current?.click();
+    if (requestedAction.type === 'export') handleExportExcel();
+    if (requestedAction.type === 'print') window.print();
+    onActionHandled?.();
+  }, [requestedAction]);
+
   return (
     <div className="space-y-6 animate-fadeIn font-sans">
       {/* Top Header */}
@@ -528,7 +539,16 @@ export const AdminBillsOfCostsStudioView: React.FC<AdminBillsOfCostsStudioViewPr
           <label className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 cursor-pointer shadow-2xs">
             <Upload className="w-3.5 h-3.5 text-zinc-500" />
             <span>Import Excel (.xlsx)</span>
-            <input type="file" accept=".xlsx,.xls,.csv" onChange={handleImportExcel} className="hidden" />
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={event => {
+                handleImportExcel(event);
+                event.currentTarget.value = '';
+              }}
+              className="hidden"
+            />
           </label>
 
           <button
@@ -912,4 +932,3 @@ export const AdminBillsOfCostsStudioView: React.FC<AdminBillsOfCostsStudioViewPr
     </div>
   );
 };
-

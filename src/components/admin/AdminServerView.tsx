@@ -8,8 +8,6 @@ import {
 interface AdminServerViewProps {
   showToast: (msg: string) => void;
   internetSpeed?: number;
-  batteryLevel?: number;
-  isBatteryCharging?: boolean;
   uptimeSeconds?: number;
   formatUptime?: (secs: number) => string;
 }
@@ -84,7 +82,7 @@ export const AdminServerView: React.FC<AdminServerViewProps> = ({ showToast }) =
           </div>
           <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/60">
             <span className="text-[10px] text-zinc-400 block">Power Batteries</span>
-            <strong className="text-emerald-600 dark:text-emerald-400 font-bold">100% (Working Well)</strong>
+            <strong className="text-zinc-500 dark:text-zinc-400 font-bold">78% estimate</strong>
           </div>
           <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/60">
             <span className="text-[10px] text-zinc-400 block">Temperature</span>

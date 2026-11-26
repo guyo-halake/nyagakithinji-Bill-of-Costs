@@ -228,6 +228,8 @@ interface TechSupportViewProps {
 export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser }) => {
   // Navigation Tabs: exactly 3 minimalist tabs (tickets, telemetry, recovery)
   const [activeTab, setActiveTab] = useState<'tickets' | 'telemetry' | 'recovery'>('tickets');
+  // Keep unverified health and recovery tools out of the support page for now.
+  const showAdvancedSupportTools = false;
 
   // Matters & Fee Notes for dropdown context
   const [firmMatters, setFirmMatters] = useState<ExactMatterRecord[]>([]);
@@ -928,58 +930,12 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
   return (
     <div className="w-full space-y-4 pb-12 font-sans text-slate-900 dark:text-zinc-100 animate-fadeIn">
 
-      {/* ================================================================== */}
-      {/* 1. TOP P3L DEVELOPERS CONTACT CARD                                 */}
-      {/* ================================================================== */}
-      <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-[var(--border-color)] shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              <h2 className="font-brand font-bold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
-                P3L Developers, Nairobi
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 font-mono">
-              Lead Engineers: <strong className="text-slate-800 dark:text-zinc-200">Razak Guyo (Admin)</strong> &middot; <strong className="text-slate-800 dark:text-zinc-200">Victor Karani (Lead)</strong>
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5 text-xs font-mono">
-            {/* Phone */}
-            <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)]">
-              <Phone className="w-3.5 h-3.5 text-blue-500" />
-              <a href="tel:+254141888585" className="hover:underline font-bold text-slate-800 dark:text-zinc-200">+254 141 888 585</a>
-              <span className="text-slate-400">&middot;</span>
-              <a href="tel:+254768398022" className="hover:underline font-bold text-slate-800 dark:text-zinc-200">+254 768 398 022</a>
-            </div>
-
-            {/* Email */}
-            <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)]">
-              <Mail className="w-3.5 h-3.5 text-emerald-500" />
-              <a href="mailto:p3lcodes@gmail.com" className="hover:underline font-bold text-slate-800 dark:text-zinc-200">p3lcodes@gmail.com</a>
-              <span className="text-slate-400">&middot;</span>
-              <a href="mailto:razakp3l@pdevelopers.com" className="hover:underline font-bold text-slate-800 dark:text-zinc-200">razakp3l@pdevelopers.com</a>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ================================================================== */}
-      {/* 2. HEADER: P3L Developers IT Support                               */}
-      {/* ================================================================== */}
       <div className="pt-1 mb-3 border-b border-[var(--border-color)] pb-3 space-y-0.5">
         <h1 className="font-brand font-bold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
           Support &amp; Helpdesk
         </h1>
-        <p className="text-xs text-slate-500 font-mono">
-          P3L Developers | Nyagah B Kithinji and co
-        </p>
       </div>
 
-      {/* ================================================================== */}
-      {/* 3. NAVIGATION TABS (EXACTLY 3 TABS)                                */}
-      {/* ================================================================== */}
       <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto pb-1 border-b border-[var(--border-color)] text-xs font-medium scrollbar-thin">
         <button
           onClick={() => setActiveTab('tickets')}
@@ -998,7 +954,7 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
           )}
         </button>
 
-        <button
+        {showAdvancedSupportTools && <button
           onClick={() => setActiveTab('telemetry')}
           className={`px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'telemetry'
@@ -1008,9 +964,9 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
         >
           <Activity className="w-4 h-4" />
           <span>System Health</span>
-        </button>
+        </button>}
 
-        <button
+        {showAdvancedSupportTools && <button
           onClick={() => setActiveTab('recovery')}
           className={`px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'recovery'
@@ -1020,7 +976,7 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
         >
           <Wrench className="w-4 h-4" />
           <span>Database Tools & Recovery</span>
-        </button>
+        </button>}
       </div>
 
       {/* ================================================================== */}
@@ -1445,7 +1401,7 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
       {/* ================================================================== */}
       {/* TAB 2: SYSTEM HEALTH & SERVICES                                    */}
       {/* ================================================================== */}
-      {activeTab === 'telemetry' && (
+      {showAdvancedSupportTools && activeTab === 'telemetry' && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-[var(--border-color)]">
             <div>
@@ -1522,7 +1478,7 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
       {/* ================================================================== */}
       {/* TAB 3: SYSTEM RECOVERY & DATABASE TOOLS                            */}
       {/* ================================================================== */}
-      {activeTab === 'recovery' && (
+      {showAdvancedSupportTools && activeTab === 'recovery' && (
         <div className="space-y-6">
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1765,15 +1721,6 @@ export const TechSupportView: React.FC<TechSupportViewProps> = ({ currentUser })
       {/* ================================================================== */}
       {/* FOOTER                                                             */}
       {/* ================================================================== */}
-      <footer className="pt-6 border-t border-[var(--border-color)] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 font-mono">
-        <div>
-          P3L Developers IT Support &middot; Nairobi, Kenya
-        </div>
-        <div>
-          Nyagah B. Kithinji & Co. Advocates
-        </div>
-      </footer>
-
     </div>
   );
 };

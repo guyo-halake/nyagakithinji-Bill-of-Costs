@@ -10,25 +10,22 @@ import {
 import * as XLSX from 'xlsx';
 import { fetchMatters, fetchClients, syncMatterAndClientFromFeeNote } from '../../services/data';
 import { sendEmail } from '../../services/email';
-import { ExactMatterRecord, ExactClientRecord, getClients, getMatters } from '../../services/supabase';
+import { ExactMatterRecord, ExactClientRecord } from '../../services/supabase';
 import { calculateLegalBill, BillCalculationResult } from '../../services/api';
-import { 
-  EXACT_FIRM_INFO, 
-  getActiveFirmProfile, 
-  FirmProfile, 
-  EXACT_FEE_NOTES, 
-  supabase, 
-  ExactFeeNoteRecord, 
-  SystemUser, 
-  persistFeeNotes, 
-  getFeeNotes,
-  saveFeeNoteToDatabase,
+import {
+  getActiveFirmProfile,
+  FirmProfile,
+  supabase,
+  ExactFeeNoteRecord,
+  SystemUser,
   uploadPdfToVault
 } from '../../services/supabase';
 import { hasPermission } from '../../services/rbac';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { generateDocumentSecurityPayload, DocumentSecurityRecord } from '../../services/documentSecurity';
+import { fetchFirmStamps } from '../../services/firmStamps';
+import { auditFeeNoteWithNyagahAgent, AroAuditResult } from '../../services/nyagahAgent';
 
 const STATUTORY_SCHEDULES = [
   { id: 'schedule_1_conveyancing', label: 'Schedule 1 — Conveyancing: Sales, Purchases, Mortgages & Charges', category: 'Conveyancing' },
@@ -85,7 +82,7 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
     const handleFirmChange = () => {
       const updated = getActiveFirmProfile();
       setActiveFirm(updated);
-      setBankDetailsText(updated.bankDetails || `${updated.bankName || 'KCB Bank Kenya Ltd'} | ${updated.bankBranch || 'Kilimani Branch'} | A/C No: ${updated.bankAccount || '1104889922'} | Swift: ${updated.swiftCode || 'KCBLKENX'}`);
+      setBankDetailsText(updated.bankDetails || '');
       if (updated.stampUrl) {
         setStampImageUrl(updated.stampUrl);
       }
@@ -113,27 +110,26 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
   const [clientName, setClientName] = useState(initialNote?.clientName || '');
 
   // Fee Note Specific Details (Client Billing)
-  const [clientAddress, setClientAddress] = useState(
-    'Riverside Green Suites, 4th Floor\nP.O. Box 72892-00200\nNairobi, Kenya'
-  );
+  const [clientAddress, setClientAddress] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [isEmailing, setIsEmailing] = useState(false);
   const [isWhatsAppSending, setIsWhatsAppSending] = useState(false);
   const [bankDetailsText, setBankDetailsText] = useState(
-    activeFirm.bankDetails || 'KCB Bank Kenya Ltd | Kilimani Branch | A/C No: 1104889922 | Swift: KCBLKENX'
+    activeFirm.bankDetails || ''
   );
   const [paymentTermsText, setPaymentTermsText] = useState(
-    'Payment is due upon presentation within 30 days.\nDirect EFT / RTGS or Cheque payable to ${activeFirm.name}.'
+    `Payment is due upon presentation within 30 days.\nDirect EFT / RTGS or cheque payable to ${activeFirm.name}.`
   );
   const [signatoryName, setSignatoryName] = useState(
-    currentUser?.fullName || EXACT_FIRM_INFO.user.name || 'Guyo Halake'
+    currentUser?.fullName || ''
   );
   const [isLinkedCourtMatter, setIsLinkedCourtMatter] = useState(false);
 
   // Live Database Records (Matters & Clients)
   const [availableMatters, setAvailableMatters] = useState<ExactMatterRecord[]>([]);
   const [availableClients, setAvailableClients] = useState<ExactClientRecord[]>([]);
+  const [recordsLoadError, setRecordsLoadError] = useState('');
   const [selectedMatterId, setSelectedMatterId] = useState<string>('');
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -141,10 +137,7 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
   // References & Dates
   const [documentRef, setDocumentRef] = useState(() => {
     if (initialNote?.billNumber) return initialNote.billNumber;
-    const yr = new Date().getFullYear().toString().slice(-2);
-    const mo = String(new Date().getMonth() + 1).padStart(2, '0');
-    const docNum = String(EXACT_FEE_NOTES.length + 1).padStart(3, '0');
-    return `BOC${yr}${mo}${docNum}`;
+    return '';
   });
   const [dateBilled, setDateBilled] = useState(new Date().toISOString().split('T')[0]);
 
@@ -166,32 +159,17 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
   // Line Items & Disbursements
   const [items, setItems] = useState<Array<{ description: string; unitRate: number; citation?: string }>>(() => {
     if (initialNote?.excelData && Array.isArray(initialNote.excelData) && initialNote.excelData.length > 0) {
-      return initialNote.excelData.map((d: any) => ({
-        description: d.description || d.Particulars || 'Drawing and Filing Notice of Motion Application',
-        unitRate: Number(d.unitRate || d.Amount || d.Fee || 4500),
-        citation: d.citation || 'Sched. 6 Item 4'
-      }));
-    }
-    if (initialNote) {
-      return [
-        { description: 'Drawing and Filing Plaint / Statement of Claim', unitRate: 5000, citation: 'Sched. 6 Item 4' },
-        { description: 'Attendance at Court for Mention / Directions', unitRate: 2500, citation: 'Sched. 6 Item 7' },
-        { description: 'Drawing and Filing Notice of Motion Application', unitRate: 4500, citation: 'Sched. 6 Item 4' },
-        { description: 'Perusing Written Statement of Defence & Annexures', unitRate: 2500, citation: 'Sched. 6 Item 8' }
-      ];
+      return initialNote.excelData
+        .filter((item: any) => (item.description || item.Particulars) && Number.isFinite(Number(item.unitRate ?? item.Amount ?? item.Fee)))
+        .map((item: any) => ({
+          description: String(item.description || item.Particulars),
+          unitRate: Number(item.unitRate ?? item.Amount ?? item.Fee),
+          citation: item.citation || undefined,
+        }));
     }
     return [];
   });
-  const [extraExpenses, setExtraExpenses] = useState<Array<{ description: string; unitRate: number }>>(() => {
-    if (initialNote) {
-      return [
-        { description: 'Judiciary Court Filing Fee Receipt', unitRate: 5000 },
-        { description: 'Licensed Process Server Returns & Service', unitRate: 3500 },
-        { description: 'Courier, Postage & Delivery Charges', unitRate: 1500 }
-      ];
-    }
-    return [];
-  });
+  const [extraExpenses, setExtraExpenses] = useState<Array<{ description: string; unitRate: number }>>([]);
 
   const [newItemDesc, setNewItemDesc] = useState('');
   const [newItemVal, setNewItemVal] = useState<number | ''>('');
@@ -213,6 +191,30 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
       return '/stamp.png';
     }
   });
+  useEffect(() => {
+    let active = true;
+    if (!currentUser?.firmId) return () => { active = false; };
+
+    const importSavedStamps =
+      currentUser.hasAllPermissions ||
+      currentUser.role === 'Admin' ||
+      currentUser.role === 'Developer';
+    void fetchFirmStamps(currentUser.firmId, importSavedStamps)
+      .then(stamps => {
+        const defaultStamp = stamps.find(stamp => stamp.isDefault);
+        if (active && defaultStamp) setStampImageUrl(defaultStamp.imageUrl);
+      })
+      .catch(error => {
+        if (active) {
+          triggerToast(
+            'error',
+            error instanceof Error ? error.message : 'Could not load the firm stamp.'
+          );
+        }
+      });
+
+    return () => { active = false; };
+  }, [currentUser?.firmId, currentUser?.hasAllPermissions, currentUser?.role]);
   const [stampModalOpen, setStampModalOpen] = useState(false);
   const stampFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [signMeOff, setSignMeOff] = useState(true);
@@ -227,11 +229,15 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
   const [shareInput, setShareInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [actionToast, setActionToast] = useState<{ type: 'success' | 'error' | 'loading'; message: string } | null>(null);
+  const [actionToast, setActionToast] = useState<{ type: 'success' | 'error' | 'loading' | 'info'; message: string } | null>(null);
+
+  // Nyagah Agent ARO Statutory Audit State
+  const [aroAudit, setAroAudit] = useState<AroAuditResult | null>(null);
+  const [isAuditingAro, setIsAuditingAro] = useState(false);
 
   const can = (code: string) => hasPermission(currentUser, code);
 
-  const triggerToast = (type: 'success' | 'error' | 'loading', message: string, autoDismiss = 4000) => {
+  const triggerToast = (type: 'success' | 'error' | 'loading' | 'info', message: string, autoDismiss = 4000) => {
     setActionToast({ type, message });
     if (autoDismiss > 0) {
       setTimeout(() => {
@@ -239,6 +245,67 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
       }, autoDismiss);
     }
   };
+
+  const handleRunAroAudit = async () => {
+    setIsAuditingAro(true);
+    try {
+      const numericClaimValue = Number(claimValue) || 0;
+      // Map items (unitRate field) + extraExpenses into the agent's audit shape
+      const auditItems = [
+        ...items.map(i => ({ description: i.description, amount: Number(i.unitRate) || 0 })),
+        ...extraExpenses.map(e => ({ description: e.description, amount: Number(e.unitRate) || 0 }))
+      ];
+      const result = await auditFeeNoteWithNyagahAgent({
+        schedule: courtSchedule,
+        claim_value: numericClaimValue,
+        items: auditItems
+      });
+      setAroAudit(result);
+      triggerToast('info', 'Checklist complete. It does not confirm legal compliance; review the bill against the current law and case record.');
+    } catch (err) {
+      console.error('Audit failed:', err);
+      triggerToast('error', 'Unable to complete ARO compliance audit.');
+    } finally {
+      setIsAuditingAro(false);
+    }
+  };
+
+  const applyAroCorrection = (actionKey: string) => {
+    const numericClaimValue = Number(claimValue) || 0;
+    if (actionKey === 'append_vat_16') {
+      const professionalSum = items.reduce((acc, i) => acc + (Number(i.unitRate) || 0), 0);
+      const vatAmount = Math.round(professionalSum * 0.16);
+      setExtraExpenses(prev => [
+        ...prev,
+        { description: 'Value Added Tax (VAT) @ 16% on Professional Fees', unitRate: vatAmount }
+      ]);
+      triggerToast('success', 'Appended 16% VAT to disbursements.');
+    } else if (actionKey === 'add_getting_up_fee') {
+      const instructionItem = items.find(i => (i.description || '').toLowerCase().includes('instruction'));
+      const instructionFee = instructionItem ? Number(instructionItem.unitRate) : Math.max(numericClaimValue * 0.05, 75000);
+      const gettingUpFee = Math.round(instructionFee / 3);
+      setItems(prev => [
+        ...prev,
+        { description: 'Getting-Up Fee for Trial Preparation (Statutory 1/3 of Instruction Fees — Item 2 Schedule 6)', unitRate: gettingUpFee }
+      ]);
+      triggerToast('success', 'Appended statutory 1/3 Getting-Up fee.');
+    } else if (actionKey === 'add_instruction_fee') {
+      setItems(prev => [
+        ...prev,
+        { description: `Instruction Fees under ARO Schedule 6 — Claim Value KES ${numericClaimValue.toLocaleString()}`, unitRate: Math.max(numericClaimValue * 0.05, 150000) }
+      ]);
+      triggerToast('success', 'Appended statutory Instruction Fee line item.');
+    } else if (actionKey === 'add_filing_disbursements') {
+      setExtraExpenses(prev => [
+        ...prev,
+        { description: 'Kenya Judiciary CTS E-Filing & Process Service Disbursements', unitRate: 5500 }
+      ]);
+      triggerToast('success', 'Appended CTS filing disbursements.');
+    } else {
+      triggerToast('success', 'Statutory item applied.');
+    }
+  };
+
 
   const handleStampFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -351,14 +418,31 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
 
   // Load live clients and matters for auto-fill and auto-linking
   useEffect(() => {
-    const firmId = currentUser?.firmId || 'firm-001';
-    const loadData = () => {
-      fetchClients(firmId).then(setAvailableClients).catch(() => setAvailableClients(getClients()));
-      fetchMatters(firmId).then(setAvailableMatters).catch(() => setAvailableMatters(getMatters()));
-    };
-    loadData();
+    const loadData = async () => {
+      if (!currentUser?.firmId) {
+        setAvailableClients([]);
+        setAvailableMatters([]);
+        setRecordsLoadError('Sign in to load your firm’s clients and matters.');
+        return;
+      }
 
-    const handleSync = () => loadData();
+      try {
+        const [clients, matters] = await Promise.all([
+          fetchClients(currentUser.firmId),
+          fetchMatters(currentUser.firmId),
+        ]);
+        setAvailableClients(clients);
+        setAvailableMatters(matters);
+        setRecordsLoadError('');
+      } catch {
+        setAvailableClients([]);
+        setAvailableMatters([]);
+        setRecordsLoadError('We could not load your clients and matters. Check your connection and try again.');
+      }
+    };
+    void loadData();
+
+    const handleSync = () => void loadData();
     window.addEventListener('clientsUpdated', handleSync);
     window.addEventListener('mattersUpdated', handleSync);
     return () => {
@@ -402,30 +486,9 @@ export const FeeNoteBuilderView: React.FC<FeeNoteBuilderViewProps> = ({
       setClaimantName(initialNote.claimantName || initialNote.clientName || '');
       setRespondentName(initialNote.respondentName || '');
       setJudgeName(initialNote.judgeName || '');
-      setDocumentRef(initialNote.billNumber || `BOC2610001`);
+      setDocumentRef(initialNote.billNumber || '');
     }
   }, [initialNote]);
-
-  // Load live Matters and Clients from Supabase database
-  useEffect(() => {
-    let isMounted = true;
-    const loadLiveRecords = async () => {
-      try {
-        const [mList, cList] = await Promise.all([
-          fetchMatters('a0000000-0000-0000-0000-000000000001'),
-          fetchClients('a0000000-0000-0000-0000-000000000001')
-        ]);
-        if (isMounted) {
-          if (mList && mList.length > 0) setAvailableMatters(mList);
-          if (cList && cList.length > 0) setAvailableClients(cList);
-        }
-      } catch (err) {
-        console.warn('Live records load error, fallback in place:', err);
-      }
-    };
-    loadLiveRecords();
-    return () => { isMounted = false; };
-  }, []);
 
   // Real-time Offline & Online Cryptographic Seal Generation
   useEffect(() => {
@@ -743,37 +806,38 @@ NAIROBI, KENYA
 
   // Persistence Engine
   const persistNoteToDatabase = async (status: 'processed' | 'draft' = 'processed') => {
-    const firmId = currentUser?.firmId || 'firm-001';
-    const userId = currentUser?.id || 'usr-karani-001';
-    const userName = currentUser?.fullName || 'Karani Victor';
+    if (!currentUser?.firmId || !currentUser.id) {
+      throw new Error('Your firm account could not be verified. Sign out and sign in again.');
+    }
+    if (!documentRef.trim()) {
+      throw new Error('Enter a document reference before saving.');
+    }
+
+    const firmId = currentUser.firmId;
+    const userId = currentUser.id;
+    const userName = currentUser.fullName;
     const total = result?.grand_total || initialNote?.grandTotal || 0;
     let savedDatabaseId = initialNote?.id;
 
-    // Seamless Auto-Sync: Client & Matter Auto-Creation / Linking
-    let syncRes: any = null;
-    try {
-      syncRes = await syncMatterAndClientFromFeeNote(firmId, {
-        billNumber: documentRef,
-        clientName: clientName || claimantName,
-        claimantName: claimantName || clientName,
-        respondentName: respondentName,
-        matterTitle: matterTitle,
-        forumName: forumName,
-        courtSchedule: courtSchedule,
-        claimValue: typeof claimValue === 'number' ? claimValue : 0,
-        instructionFee: result?.instruction_fee || 0,
-        gettingUpFee: result?.getting_up_fee || 0,
-        grandTotal: total,
-        clientAddress: clientAddress,
-        isDefendant: isDefendant,
-      }, currentUser);
-    } catch (syncErr) {
-      console.warn('Auto-sync client and matter notice:', syncErr);
-    }
+    const syncRes = await syncMatterAndClientFromFeeNote(firmId, {
+      billNumber: documentRef,
+      clientName: clientName || claimantName,
+      claimantName: claimantName || clientName,
+      respondentName: respondentName,
+      matterTitle: matterTitle,
+      forumName: forumName,
+      courtSchedule: courtSchedule,
+      claimValue: typeof claimValue === 'number' ? claimValue : 0,
+      instructionFee: result?.instruction_fee || 0,
+      gettingUpFee: result?.getting_up_fee || 0,
+      grandTotal: total,
+      clientAddress: clientAddress,
+      isDefendant: isDefendant,
+    }, currentUser);
 
-    const linkedMatterId = syncRes?.matterId || initialNote?.matterId || "custom";
-    const linkedMatterTitle = syncRes?.matterTitle || matterTitle || "Bill of Costs";
-    const linkedClientName = syncRes?.clientName || claimantName || clientName || "Client";
+    const linkedMatterId = syncRes.matterId;
+    const linkedMatterTitle = syncRes.matterTitle;
+    const linkedClientName = syncRes.clientName;
 
     const payload: Record<string, any> = {
       firm_id: firmId,
@@ -791,35 +855,32 @@ NAIROBI, KENYA
       generated_by_user_id: userId,
     };
 
-    let cloudDbError: string | null = null;
-    try {
-      const { data, error } = await supabase
-        .from('fee_notes')
-        .upsert(payload, { onConflict: 'bill_number' })
-        .select('*')
-        .single();
+    const { data, error } = await supabase
+      .from('fee_notes')
+      .upsert(payload, { onConflict: 'bill_number' })
+      .select('*')
+      .single();
+    if (error) throw error;
+    if (!data) throw new Error('The fee note was not returned after saving. Please refresh and check before retrying.');
+    savedDatabaseId = data.id;
 
-      if (!error && data) {
-        savedDatabaseId = data.id;
-        if (items.length > 0) {
-          try {
-            await supabase.from('fee_note_items').delete().eq('fee_note_id', data.id);
-            await supabase.from('fee_note_items').insert(items.map((item, index) => ({
-              fee_note_id: data.id,
-              item_number: index + 1,
-              description: item.description,
-              unit_rate: item.unitRate,
-              claimed_amount: item.unitRate,
-            })));
-          } catch (e) {
-            console.warn(e);
-          }
-        }
-      } else if (error) {
-        cloudDbError = error.message;
-      }
-    } catch (e: any) {
-      cloudDbError = e?.message;
+    if (items.length > 0) {
+      const { error: deleteItemsError } = await supabase
+        .from('fee_note_items')
+        .delete()
+        .eq('fee_note_id', savedDatabaseId);
+      if (deleteItemsError) throw deleteItemsError;
+
+      const { error: saveItemsError } = await supabase
+        .from('fee_note_items')
+        .insert(items.map((item, index) => ({
+          fee_note_id: savedDatabaseId,
+          item_number: index + 1,
+          description: item.description,
+          unit_rate: item.unitRate,
+          claimed_amount: item.unitRate,
+        })));
+      if (saveItemsError) throw saveItemsError;
     }
 
     const savedNote: ExactFeeNoteRecord = {
@@ -841,14 +902,12 @@ NAIROBI, KENYA
       approvalStatus: status === 'processed' ? 'approved' : 'pending',
       generatedByUser: userName,
       generatedByUserId: userId,
-      createdAt: new Date().toLocaleString(),
+      createdAt: new Date().toISOString(),
       pdfUrl: "",
       excelUrl: initialNote?.excelUrl || "",
       excelData: initialNote?.excelData
     };
 
-    // Save directly to Authoritative Database so all users & sessions access it
-    await saveFeeNoteToDatabase(savedNote);
     return { note: savedNote, cloudDbError: null, syncRes };
   };
 
@@ -1644,11 +1703,18 @@ NAIROBI, KENYA
 
   return (
     <div className="space-y-4 relative pb-12">
+      {recordsLoadError && (
+        <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          {recordsLoadError}
+        </p>
+      )}
+
       {/* Toast Notification */}
       {actionToast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl border text-xs sm:text-sm font-semibold animate-in fade-in slide-in-from-top-4 duration-200 backdrop-blur-md transition-all bg-slate-900 text-white border-slate-700">
           {actionToast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
           {actionToast.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />}
+          {actionToast.type === 'info' && <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />}
           <span>{actionToast.message}</span>
         </div>
       )}
@@ -2233,6 +2299,102 @@ NAIROBI, KENYA
                 )}
               </div>
 
+              {/* Nyagah Agent ARO Statutory Pre-Sealing Audit */}
+              <div className="p-4 rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-950/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Bill checklist</span>
+                        <span className="text-[10px] font-normal text-blue-600 dark:text-blue-400 font-mono">
+                          Basic review
+                        </span>
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-zinc-400">
+                        Checks for missing descriptions and amounts. It does not verify statutory rates or legal compliance.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunAroAudit}
+                    disabled={isAuditingAro}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Scale className={`w-3.5 h-3.5 ${isAuditingAro ? 'animate-spin' : ''}`} />
+                    <span>{isAuditingAro ? 'Checking…' : 'Run checklist'}</span>
+                  </button>
+                </div>
+
+                {aroAudit && (
+                  <div className="pt-2 border-t border-blue-100 dark:border-blue-900/40 space-y-2.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                          }`}
+                        >
+                          Checks run: {aroAudit.checks_completed}
+                        </span>
+                        <span className="text-[11px] text-slate-600 dark:text-zinc-300 font-medium">
+                          Checklist only — not legal approval
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
+                        {aroAudit.statutory_schedule}
+                      </span>
+                    </div>
+
+                    {aroAudit.findings.length > 0 && (
+                      <div className="space-y-1">
+                        {aroAudit.findings.map((f, i) => (
+                          <div
+                            key={i}
+                            className={`p-2 rounded-lg text-xs flex items-start gap-1.5 ${
+                              f.startsWith('CRITICAL')
+                                ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300'
+                                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'
+                            }`}
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{f}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {aroAudit.suggested_corrections.length > 0 && (
+                      <div className="pt-1 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          One-Click Statutory Auto-Corrections
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {aroAudit.suggested_corrections.map((corr, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => applyAroCorrection(corr.action)}
+                              className="px-2.5 py-1 bg-white dark:bg-zinc-800 border border-[var(--border-color)] hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>{corr.note}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-slate-400 dark:text-zinc-500 italic pt-1">
+                      {aroAudit.advocate_note}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-between items-center pt-2">
                 <button
                   type="button"
@@ -2488,6 +2650,102 @@ NAIROBI, KENYA
                 </form>
               </div>
 
+              {/* Nyagah Agent ARO Statutory Pre-Sealing Audit */}
+              <div className="p-4 rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-950/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Bill checklist</span>
+                        <span className="text-[10px] font-normal text-blue-600 dark:text-blue-400 font-mono">
+                          Basic review
+                        </span>
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-zinc-400">
+                        Checks for missing descriptions and amounts. It does not verify statutory rates or legal compliance.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunAroAudit}
+                    disabled={isAuditingAro}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Scale className={`w-3.5 h-3.5 ${isAuditingAro ? 'animate-spin' : ''}`} />
+                    <span>{isAuditingAro ? 'Checking…' : 'Run checklist'}</span>
+                  </button>
+                </div>
+
+                {aroAudit && (
+                  <div className="pt-2 border-t border-blue-100 dark:border-blue-900/40 space-y-2.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                          }`}
+                        >
+                          Checks run: {aroAudit.checks_completed}
+                        </span>
+                        <span className="text-[11px] text-slate-600 dark:text-zinc-300 font-medium">
+                          Checklist only — not legal approval
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
+                        {aroAudit.statutory_schedule}
+                      </span>
+                    </div>
+
+                    {aroAudit.findings.length > 0 && (
+                      <div className="space-y-1">
+                        {aroAudit.findings.map((f, i) => (
+                          <div
+                            key={i}
+                            className={`p-2 rounded-lg text-xs flex items-start gap-1.5 ${
+                              f.startsWith('CRITICAL')
+                                ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300'
+                                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'
+                            }`}
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{f}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {aroAudit.suggested_corrections.length > 0 && (
+                      <div className="pt-1 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          One-Click Statutory Auto-Corrections
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {aroAudit.suggested_corrections.map((corr, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => applyAroCorrection(corr.action)}
+                              className="px-2.5 py-1 bg-white dark:bg-zinc-800 border border-[var(--border-color)] hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>{corr.note}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-slate-400 dark:text-zinc-500 italic pt-1">
+                      {aroAudit.advocate_note}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-between items-center pt-2">
                 <button
                   type="button"
@@ -2612,6 +2870,102 @@ NAIROBI, KENYA
                   </div>
                   <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">Official Seal</span>
                 </label>
+              </div>
+
+              {/* Nyagah Agent ARO Statutory Pre-Sealing Audit */}
+              <div className="p-4 rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-950/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Bill checklist</span>
+                        <span className="text-[10px] font-normal text-blue-600 dark:text-blue-400 font-mono">
+                          Basic review
+                        </span>
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-zinc-400">
+                        Checks for missing descriptions and amounts. It does not verify statutory rates or legal compliance.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunAroAudit}
+                    disabled={isAuditingAro}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Scale className={`w-3.5 h-3.5 ${isAuditingAro ? 'animate-spin' : ''}`} />
+                    <span>{isAuditingAro ? 'Checking…' : 'Run checklist'}</span>
+                  </button>
+                </div>
+
+                {aroAudit && (
+                  <div className="pt-2 border-t border-blue-100 dark:border-blue-900/40 space-y-2.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                          }`}
+                        >
+                          Checks run: {aroAudit.checks_completed}
+                        </span>
+                        <span className="text-[11px] text-slate-600 dark:text-zinc-300 font-medium">
+                          Checklist only — not legal approval
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
+                        {aroAudit.statutory_schedule}
+                      </span>
+                    </div>
+
+                    {aroAudit.findings.length > 0 && (
+                      <div className="space-y-1">
+                        {aroAudit.findings.map((f, i) => (
+                          <div
+                            key={i}
+                            className={`p-2 rounded-lg text-xs flex items-start gap-1.5 ${
+                              f.startsWith('CRITICAL')
+                                ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300'
+                                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'
+                            }`}
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{f}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {aroAudit.suggested_corrections.length > 0 && (
+                      <div className="pt-1 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          One-Click Statutory Auto-Corrections
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {aroAudit.suggested_corrections.map((corr, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => applyAroCorrection(corr.action)}
+                              className="px-2.5 py-1 bg-white dark:bg-zinc-800 border border-[var(--border-color)] hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>{corr.note}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-slate-400 dark:text-zinc-500 italic pt-1">
+                      {aroAudit.advocate_note}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-between items-center pt-2">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SEEDED_USERS, SystemUser } from '../../services/supabase';
+import { SystemUser } from '../../services/supabase';
 import { fetchFirmUsers, createFirmUser, updateFirmUser, deleteFirmUser } from '../../services/data';
 import { 
   Users, UserPlus, Key, ShieldCheck, CheckCircle2, Lock, Trash2, Edit, 
@@ -9,21 +9,29 @@ import {
 import { showToast } from './ToastNotification';
 import { FOUR_ROLE_TEMPLATES, assignRoleToUser, RoleTemplate } from '../../services/rbac';
 
-export const AdminUsersRolesView: React.FC = () => {
-  const [userList, setUserList] = useState<SystemUser[]>(SEEDED_USERS);
+interface AdminUsersRolesViewProps {
+  currentUser?: SystemUser | null;
+}
+
+export const AdminUsersRolesView: React.FC<AdminUsersRolesViewProps> = ({ currentUser }) => {
+  const [userList, setUserList] = useState<SystemUser[]>([]);
   const [activeTab, setActiveTab] = useState<'All' | 'Developer' | 'Admin' | 'Advocate'>('All');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
 
-  // Load authoritative database users on mount
+  // Load active firm users from Supabase.
   useEffect(() => {
-    fetchFirmUsers().then(users => {
-      if (users && users.length > 0) {
-        setUserList(users);
-      }
-    }).catch(() => {});
-  }, []);
+    if (!currentUser?.firmId) {
+      setUserList([]);
+      return;
+    }
+
+    void fetchFirmUsers(currentUser.firmId).then(setUserList).catch(error => {
+      setUserList([]);
+      showToast('error', 'Could not load firm users', error.message || 'Check your connection and permissions, then try again.');
+    });
+  }, [currentUser?.firmId]);
 
   // 2FA Password Reset State
   const [passwordModalUser, setPasswordModalUser] = useState<SystemUser | null>(null);

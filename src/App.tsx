@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
-import { Navbar } from './components/layout/Navbar';
+import { Navbar, NavbarSearchResult } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { BreadcrumbsNav } from './components/layout/BreadcrumbsNav';
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -29,27 +29,27 @@ import { LiveActivityFeedView } from './components/admin/LiveActivityFeedView';
 import { ToastContainer } from './components/admin/ToastNotification';
 import { AccessDeniedView } from './components/common/AccessDeniedView';
 import { DocumentVerifyView } from './components/verify/DocumentVerifyView';
+import { StampsAndVerificationView } from './components/stamps/StampsAndVerificationView';
 import { PaymentsBillingView } from './components/payments/PaymentsBillingView';
 import { DeveloperPage } from './components/admin/DeveloperPage';
 import { MailingTemplatesView } from './components/admin/MailingTemplatesView';
 import { DatabaseStudioView } from './components/admin/DatabaseStudioView';
 
-import { supabase, SystemUser, fetchFeeNotesFromDatabase } from './services/supabase';
+import {
+  supabase,
+  SystemUser,
+  fetchFeeNotesFromDatabase,
+} from './services/supabase';
 import { getCurrentUserProfile, signOut, subscribeToAuthState } from './services/auth';
 import { subscribeToFirmTable } from './services/realtime';
 import { hasPermission } from './services/rbac';
+import { fetchClients, fetchMatters } from './services/data';
 
 export const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<SystemUser | null>(() => {
-    try {
-      const stored = localStorage.getItem('BILLSZIP_SESSION');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed && parsed.id) return parsed;
-      }
-    } catch (e) {}
-    return null;
-  });
+  const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<NavbarSearchResult[]>([]);
+  const [searchError, setSearchError] = useState('');
 
   const [currentTab, setCurrentTab] = useState<string>(() => {
     try {
@@ -58,6 +58,7 @@ export const App: React.FC = () => {
         if (path.includes('developer-page') || path.includes('developers.azure') || path.includes('developer')) return 'developer_page';
         const p = new URLSearchParams(window.location.search);
         if (p.get('tab') === 'developer-page' || p.get('tab') === 'developer_page' || p.get('tab') === 'developers.azure') return 'developer_page';
+        if (p.get('tab') === 'stamps' || p.get('tab') === 'stamps_verification' || p.get('tab') === 'stamps-and-verification') return 'stamps_verification';
         if (p.get('tab') === 'verify' || p.get('ref')) return 'verify';
       }
     } catch (e) {}
@@ -112,9 +113,6 @@ export const App: React.FC = () => {
     window.addEventListener('storage', handlePermissions);
 
     let isMounted = true;
-    // Hydrate fee notes from database
-    void fetchFeeNotesFromDatabase().catch(() => {});
-
     // Hydrate firm settings from persistent backend store
     fetch('/api/v1/users/firm-settings')
       .then(res => res.ok ? res.json() : null)
@@ -173,6 +171,77 @@ export const App: React.FC = () => {
     }));
 
     return () => cleanups.forEach(cleanup => cleanup());
+  }, [currentUser?.firmId]);
+
+  useEffect(() => {
+    const firmId = currentUser?.firmId;
+    if (!firmId) {
+      setSearchResults([]);
+      setSearchError('');
+      return;
+    }
+
+    let active = true;
+    const loadSearchRecords = async () => {
+      const [clientsResult, mattersResult, feeNotesResult] = await Promise.allSettled([
+        fetchClients(firmId),
+        fetchMatters(firmId),
+        fetchFeeNotesFromDatabase(firmId),
+      ]);
+      if (!active) return;
+
+      const results: NavbarSearchResult[] = [];
+      const errors: string[] = [];
+      if (clientsResult.status === 'fulfilled') {
+        results.push(...clientsResult.value.map(client => ({
+          id: client.id,
+          type: 'Client' as const,
+          title: client.name,
+          detail: [client.company, client.email, client.phonePrimary].filter(Boolean).join(' · '),
+          searchableText: [client.name, client.company, client.email, client.phone, client.phonePrimary, client.phoneSecondary, client.kraPin].filter(Boolean).join(' '),
+          tab: 'clients',
+        })));
+      } else {
+        errors.push(`Clients: ${clientsResult.reason instanceof Error ? clientsResult.reason.message : 'could not be loaded'}`);
+      }
+      if (mattersResult.status === 'fulfilled') {
+        results.push(...mattersResult.value.map(matter => ({
+          id: matter.id,
+          type: 'Matter' as const,
+          title: matter.title,
+          detail: [matter.caseNo, matter.applicant, matter.respondent, matter.forum].filter(Boolean).join(' · '),
+          searchableText: [matter.title, matter.caseNo, matter.ctsCaseNumber, matter.applicant, matter.respondent, matter.forum, matter.status].filter(Boolean).join(' '),
+          tab: 'matters',
+        })));
+      } else {
+        errors.push(`Matters: ${mattersResult.reason instanceof Error ? mattersResult.reason.message : 'could not be loaded'}`);
+      }
+      if (feeNotesResult.status === 'fulfilled') {
+        results.push(...feeNotesResult.value.map(note => ({
+          id: note.id,
+          type: 'Fee note' as const,
+          title: note.billNumber,
+          detail: [note.clientName, note.matterTitle, `KES ${note.grandTotal.toLocaleString('en-KE', { minimumFractionDigits: 2 })}`].filter(Boolean).join(' · '),
+          searchableText: [note.billNumber, note.clientName, note.matterTitle, note.status, note.grandTotal].join(' '),
+          tab: 'feenotes',
+        })));
+      } else {
+        errors.push(`Fee notes: ${feeNotesResult.reason instanceof Error ? feeNotesResult.reason.message : 'could not be loaded'}`);
+      }
+      setSearchResults(results);
+      setSearchError(errors.join(' '));
+    };
+
+    void loadSearchRecords();
+    const refreshSearch = (event: Event) => {
+      const table = (event as CustomEvent<{ table?: string }>).detail?.table;
+      if (['clients', 'matters', 'fee_notes'].includes(table || '')) void loadSearchRecords();
+    };
+    window.addEventListener('databaseRealtimeUpdate', refreshSearch);
+    return () => {
+      active = false;
+      window.removeEventListener('databaseRealtimeUpdate', refreshSearch);
+    };
   }, [currentUser?.firmId]);
 
   const [selectedPermissionUserId, setSelectedPermissionUserId] = useState<string>('');
@@ -321,36 +390,45 @@ export const App: React.FC = () => {
         </div>
       );
     }
-    return <AdminDashboard />;
+    return <AdminDashboard currentUser={currentUser} />;
   }
 
   return (
-    <div className="h-screen flex bg-[var(--bg-main)] text-[var(--text-main)] transition-colors duration-200 font-sans relative overflow-hidden">
-      
-      {/* Sidebar: Full Height on Left */}
-      <Sidebar
-        currentTab={currentTab}
-        setCurrentTab={handleNavigateTab}
+    <div className="h-screen flex flex-col bg-[var(--bg-main)] text-[var(--text-main)] transition-colors duration-200 font-sans relative overflow-hidden">
+      <Navbar
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
-        currentUser={currentUser}
+        isDarkMode={isDarkMode}
+        toggleTheme={toggleTheme}
+        onNavigateTab={handleNavigateTab}
         onLogout={handleLogout}
+        currentUser={currentUser}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        searchResults={searchResults}
+        searchError={searchError}
+        onSelectSearchResult={result => {
+          if (result.type === 'Matter') sessionStorage.setItem('OPEN_MATTER_ID', result.id);
+          if (result.type === 'Client') sessionStorage.setItem('OPEN_CLIENT_ID', result.id);
+          if (result.type === 'Fee note') sessionStorage.setItem('OPEN_FEE_NOTE_ID', result.id);
+          handleNavigateTab(result.tab);
+          setSearchQuery('');
+        }}
       />
 
-      {/* Main Content Area: Stacking Navbar and Dashboard */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
-        {/* Top Bar Header */}
-        <Navbar
+      <div className="flex flex-1 min-h-0 relative overflow-hidden">
+        <Sidebar
+          currentTab={currentTab}
+          setCurrentTab={handleNavigateTab}
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
-          isDarkMode={isDarkMode}
-          toggleTheme={toggleTheme}
-          onNavigateTab={handleNavigateTab}
-          onLogout={handleLogout}
           currentUser={currentUser}
+          onLogout={handleLogout}
         />
 
-        <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 w-full space-y-4">
+        {/* Main Content Area */}
+        <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative transition-[margin] duration-300 ${sidebarOpen ? 'lg:ml-64' : ''}`}>
+          <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 w-full space-y-4">
           {/* Universal Back Button & Breadcrumb Navigation Bar (All Pages Except Home) */}
           <BreadcrumbsNav
             currentTab={currentTab}
@@ -515,6 +593,22 @@ export const App: React.FC = () => {
             <DocumentVerifyView onNavigateHome={() => handleNavigateTab('home')} />
           )}
 
+          {/* STAMPS & VERIFICATION HUB */}
+          {(currentTab === 'stamps_verification' || currentTab === 'stamps') && (
+            can('settings.view') ? (
+              <StampsAndVerificationView
+                currentUser={currentUser}
+                onNavigateHome={() => handleNavigateTab('home')}
+              />
+            ) : (
+              <AccessDeniedView
+                resourceName="Stamps"
+                permissionCode="settings.view"
+                onNavigateHome={() => handleNavigateTab('home')}
+              />
+            )
+          )}
+
           {/* MANAGING PARTNER SUITE PAGES: EXECUTIVE HUB COMMENTED OUT AS PER USER REQUEST */}
           {/*
           {currentTab === 'managing_hub' && (
@@ -632,7 +726,8 @@ export const App: React.FC = () => {
               />
             )
           ) */}
-        </main>
+          </main>
+        </div>
       </div>
 
       {/* Recents & Drafts Right Sidebar Drawer */}

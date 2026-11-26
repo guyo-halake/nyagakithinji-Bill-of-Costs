@@ -5,11 +5,9 @@ import {
   ExactVaultFileRecord,
   ExactClientRecord,
   SystemUser,
-  getFeeNotes,
   persistFeeNotes,
   saveFeeNoteToDatabase,
   fetchFeeNotesFromDatabase,
-  getClients
 } from '../../services/supabase';
 import {
   fetchMatterRelatedData,
@@ -63,8 +61,8 @@ interface MattersViewProps {
 
 export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavigateToBuilder, currentUser }) => {
   const [mattersList, setMattersList] = useState<ExactMatterRecord[]>([]);
-  const [feeNotes, setFeeNotes] = useState<ExactFeeNoteRecord[]>(() => getFeeNotes());
-  const [clients, setClients] = useState<ExactClientRecord[]>(() => getClients());
+  const [feeNotes, setFeeNotes] = useState<ExactFeeNoteRecord[]>([]);
+  const [clients, setClients] = useState<ExactClientRecord[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
   const [search, setSearch] = useState('');
   const [forumFilter, setForumFilter] = useState('All');
@@ -207,21 +205,46 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
   }, []);
 
   React.useEffect(() => {
-    const firmId = currentUser?.firmId || 'firm-001';
-    const loadMatters = () => fetchMatters(firmId).then(setMattersList).catch(error => setErrorMessage(error.message || 'Unable to load matters.'));
+    const firmId = currentUser?.firmId;
+    const loadMatters = () => {
+      if (!firmId) {
+        setMattersList([]);
+        setClients([]);
+        setErrorMessage('Sign in to view matters for your firm.');
+        return;
+      }
+
+      fetchMatters(firmId)
+        .then(matters => {
+          setMattersList(matters);
+          setErrorMessage('');
+        })
+        .catch(() => {
+          setMattersList([]);
+          setErrorMessage('We could not load matter records. Check your connection and try again.');
+        });
+    };
     void loadMatters();
 
-    fetchFeeNotesFromDatabase(firmId).then(setFeeNotes).catch(() => setFeeNotes(getFeeNotes()));
-    fetchClients(firmId).then(setClients).catch(() => setClients(getClients()));
+    if (firmId) {
+      fetchFeeNotesFromDatabase(firmId).then(setFeeNotes).catch(() => {
+        setFeeNotes([]);
+        setErrorMessage('We could not load fee notes. Check your connection and try again.');
+      });
+      fetchClients(firmId).then(setClients).catch(() => setClients([]));
+    }
 
     const handleRealtime = (event: Event) => {
       const detail = (event as CustomEvent<{ table?: string }>).detail;
       if (detail?.table === 'matters') void loadMatters();
       if (detail?.table === 'fee_notes') {
-        fetchFeeNotesFromDatabase(firmId).then(setFeeNotes).catch(() => setFeeNotes(getFeeNotes()));
+        if (firmId) fetchFeeNotesFromDatabase(firmId).then(setFeeNotes).catch(() => {
+          setFeeNotes([]);
+          setErrorMessage('We could not load fee notes. Check your connection and try again.');
+        });
       }
       if (detail?.table === 'clients') {
-        fetchClients(firmId).then(setClients).catch(() => setClients(getClients()));
+        if (firmId) fetchClients(firmId).then(setClients).catch(() => setClients([]));
       }
     };
     const handleMattersUpdated = (event: any) => {
@@ -243,7 +266,11 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
 
   // Load related dossier data when matter selected
   React.useEffect(() => {
-    const firmId = currentUser?.firmId || 'firm-001';
+    const firmId = currentUser?.firmId;
+    if (!firmId) {
+      setErrorMessage('Your firm account could not be verified. Sign out and sign in again.');
+      return;
+    }
     if (!selectedMatter) return;
     const loadRelated = () => fetchMatterRelatedData(firmId, selectedMatter.id).then(related => {
       setSelectedClient(related.client);
@@ -262,6 +289,19 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     window.addEventListener('databaseRealtimeUpdate', handleRealtime);
     return () => window.removeEventListener('databaseRealtimeUpdate', handleRealtime);
   }, [currentUser?.firmId, selectedMatter?.id]);
+
+  // Deep-link opener from Dashboard "Open Cause"
+  React.useEffect(() => {
+    const targetId = sessionStorage.getItem('OPEN_MATTER_ID');
+    if (targetId && mattersList.length > 0) {
+      const found = mattersList.find(m => m.id === targetId || m.caseNo === targetId || m.ctsCaseNumber === targetId);
+      if (found) {
+        setSelectedMatter(found);
+        sessionStorage.removeItem('OPEN_MATTER_ID');
+        sessionStorage.removeItem('OPEN_MATTER_ACTION');
+      }
+    }
+  }, [mattersList]);
 
   // Helpers to resolve connected Fee Note and Client
   const getLinkedFeeNote = (m: ExactMatterRecord) => {
@@ -412,6 +452,31 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedMatterIds.length === 0) return;
+    const count = selectedMatterIds.length;
+    if (!window.confirm(`Are you sure you want to permanently delete ${count} selected matter${count > 1 ? 's' : ''} from the database? This action cannot be undone.`)) {
+      return;
+    }
+    const firmId = currentUser?.firmId;
+    if (!firmId) {
+      setErrorMessage('Your firm account could not be verified. Sign out and sign in again.');
+      return;
+    }
+    const targetIds = [...selectedMatterIds];
+    try {
+      for (const id of targetIds) {
+        await deleteMatter(firmId, id);
+      }
+      setMattersList(prev => prev.filter(m => !targetIds.includes(m.id)));
+      setSelectedMatterIds([]);
+      setShareToast(`Permanently deleted ${count} matter${count > 1 ? 's' : ''} from database.`);
+      setTimeout(() => setShareToast(''), 3000);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Batch delete failed.');
+    }
+  };
+
   const handleUpdateMatter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMatter || !currentUser?.firmId) return;
@@ -426,9 +491,13 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
 
   const handleCreateMatter = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || !currentUser?.firmId) return;
+    if (!newTitle.trim()) return;
+    if (!currentUser?.firmId) {
+      setErrorMessage('Your firm account could not be verified. Sign out and sign in again.');
+      return;
+    }
 
-    const caseNumber = newCaseNo.trim() || 'HCCC Cause No. E' + Math.floor(100 + Math.random() * 900) + ' of 2026';
+    const caseNumber = newCaseNo.trim();
     const yr = new Date().getFullYear().toString().slice(-2);
     const mo = String(new Date().getMonth() + 1).padStart(2, '0');
     const docNum = String(feeNotes.length + 1).padStart(3, '0');
@@ -472,15 +541,22 @@ export const MattersView: React.FC<MattersViewProps> = ({ onNavigateTab, onNavig
         grandTotal: Math.round(baseInstruction + gettingUp + 17000),
         status: 'draft',
         createdAt: new Date().toISOString(),
-        generatedByUser: currentUser?.fullName || 'Guyo Halake',
-        generatedByUserId: currentUser?.id || 'usr-001',
+        generatedByUser: currentUser.fullName,
+        generatedByUserId: currentUser.id,
         pdfUrl: '',
         excelUrl: '',
       };
 
       try {
-        await saveFeeNoteToDatabase(newFeeNote);
-      } catch (err) {}
+        const savedFeeNote = await saveFeeNoteToDatabase(newFeeNote, currentUser.firmId);
+        newFeeNote.id = savedFeeNote.note.id;
+      } catch (error: any) {
+        setMattersList(prev => [savedMatter, ...prev]);
+        setShowNewMatterModal(false);
+        setErrorMessage(`Matter saved, but its fee note was not saved: ${error.message || 'Please contact your administrator.'}`);
+        return;
+      }
+
       const updatedNotes = [newFeeNote, ...feeNotes];
       setFeeNotes(updatedNotes);
       persistFeeNotes(updatedNotes);
@@ -616,10 +692,17 @@ Nyagah B. Kithinji & Co. Advocates`
 
           {/* Bulk Selection Actions */}
           {selectedMatterIds.length > 0 && (
-            <div className="flex items-center gap-2 bg-[var(--bg-subtle)] border border-[var(--border-color)] px-3 py-1.5 rounded-xl shadow-xs text-xs animate-in fade-in">
+            <div className="flex flex-wrap items-center gap-2 bg-[var(--bg-subtle)] border border-[var(--border-color)] px-3 py-1.5 rounded-xl shadow-xs text-xs animate-in fade-in">
               <span className="font-mono font-semibold text-slate-800 dark:text-zinc-200">
-                {selectedMatterIds.length} selected
+                {selectedMatterIds.length} of {filtered.length} selected
               </span>
+              <button
+                type="button"
+                onClick={toggleSelectAll}
+                className="px-2 py-0.5 rounded bg-slate-200 dark:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[10px] font-semibold hover:opacity-80 cursor-pointer"
+              >
+                {selectedMatterIds.length === filtered.length ? 'Deselect All' : `Select All (${filtered.length})`}
+              </button>
               <span className="text-[var(--text-muted)]">|</span>
               <button
                 onClick={() => handleBulkStatus('Active')}
@@ -639,9 +722,20 @@ Nyagah B. Kithinji & Co. Advocates`
               >
                 Concluded
               </button>
+              <span className="text-[var(--text-muted)]">|</span>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                title="Permanently delete selected matters from database"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete ({selectedMatterIds.length})</span>
+              </button>
               <button
                 onClick={() => setSelectedMatterIds([])}
-                className="text-xs text-[var(--text-muted)] hover:text-red-500 ml-1 cursor-pointer"
+                className="text-xs text-[var(--text-muted)] hover:text-red-500 ml-1 cursor-pointer p-0.5"
+                title="Clear selection"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -1264,6 +1358,174 @@ Nyagah B. Kithinji & Co. Advocates`
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MATTER CAUSE DOSSIER (Drawer / Modal) */}
+      {selectedMatter && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden text-xs">
+            {/* Header */}
+            <div className="p-5 border-b border-[var(--border-color)] flex items-start justify-between bg-[var(--bg-subtle)]/50">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-sm flex items-center justify-center font-mono">
+                  <Scale className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white">
+                    {selectedMatter.title}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
+                    {selectedMatter.ctsCaseNumber || selectedMatter.caseNo} &bull; {selectedMatter.courtStation || selectedMatter.forum}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedMatter(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+              {/* Financial & Court Snapshot */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--border-color)]">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 block font-mono">
+                    Subject Claim Value
+                  </span>
+                  <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono mt-1">
+                    KES {(selectedMatter.amount || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--border-color)]">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 block font-mono">
+                    Lead Counsel
+                  </span>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white mt-1 truncate">
+                    {selectedMatter.leadAdvocate || 'Unassigned'}
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--border-color)]">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 block font-mono">
+                    Docket Status
+                  </span>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white mt-1">
+                    {selectedMatter.status || 'Active'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Parties */}
+              <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)]/40 space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500 dark:text-zinc-400 font-semibold">Claimant / Applicant:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{selectedMatter.applicant}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs border-t border-[var(--border-color)]/50 pt-2">
+                  <span className="text-slate-500 dark:text-zinc-400 font-semibold">Defendant / Respondent:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{selectedMatter.respondent}</span>
+                </div>
+                {selectedMatter.hearingDate && (
+                  <div className="flex justify-between items-center text-xs border-t border-[var(--border-color)]/50 pt-2">
+                    <span className="text-slate-500 dark:text-zinc-400 font-semibold">Next Court Hearing:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      {formatHearingDateAndCountdown(selectedMatter.hearingDate).dateText} ({formatHearingDateAndCountdown(selectedMatter.hearingDate).countdownText})
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Connected Fee Notes */}
+              <div>
+                <h4 className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-2 font-bold">
+                  Associated Fee Notes &amp; Bills of Costs
+                </h4>
+                {selectedFeeNotes.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">No fee notes yet generated for this cause.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedFeeNotes.map(fn => (
+                      <div key={fn.id} className="flex items-center justify-between p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)]">
+                        <div>
+                          <span className="font-mono font-bold text-slate-900 dark:text-white block">{fn.billNumber}</span>
+                          <span className="text-[11px] text-slate-500">{fn.matterTitle || fn.clientName}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-bold text-slate-900 dark:text-white">
+                            KES {(fn.grandTotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedMatter(null);
+                              if (onNavigateToBuilder) onNavigateToBuilder(fn, false);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-[11px] font-semibold cursor-pointer"
+                          >
+                            Open Bill
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Quick Actions */}
+            <div className="p-4 border-t border-[var(--border-color)] bg-[var(--bg-subtle)]/50 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setSelectedMatter(null)}
+                className="px-4 py-2 rounded-xl border border-[var(--border-color)] text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 font-semibold cursor-pointer"
+              >
+                Close Cause
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const m = selectedMatter;
+                    setSelectedMatter(null);
+                    if (onNavigateToBuilder) {
+                      onNavigateToBuilder({
+                        matterId: m.id,
+                        matterTitle: m.title || `Matter ${m.caseNo}`,
+                        caseNo: m.caseNo,
+                        claimantName: m.applicant,
+                        clientName: m.applicant,
+                        respondentName: m.respondent,
+                        claimValue: m.amount || 0,
+                        courtSchedule: 'schedule_6_high_court',
+                        forumName: m.forum || 'REPUBLIC OF KENYA\nIN THE HIGH COURT OF KENYA',
+                        documentType: 'fee_note'
+                      }, false);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold cursor-pointer shadow-xs"
+                >
+                  Generate ARO Fee Note
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const m = selectedMatter;
+                    setSelectedMatter(null);
+                    setEditingMatter(m);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-[var(--border-color)] hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 font-semibold cursor-pointer"
+                >
+                  Edit Cause
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

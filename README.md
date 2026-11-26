@@ -20,6 +20,8 @@ npm run dev
 ```
 App runs at `http://localhost:3000`.
 
+The app requires a real Supabase project URL and public anon key in `.env.local` (or in the hosting provider's build settings). It will show a setup message until both values are configured. Do not commit `.env.local`.
+
 ### Docker
 ```bash
 docker compose up --build
@@ -30,6 +32,9 @@ Runs at `http://localhost:3001`.
 - `VITE_SUPABASE_URL`: Supabase project URL
 - `VITE_SUPABASE_ANON_KEY`: Supabase public anon key
 - `VITE_API_BASE_URL`: Backend API URL (`http://localhost:8000` for local dev)
+- `VITE_N8N_WEBHOOK_URL`: Optional n8n webhook for the dashboard chat. The workflow must accept `action: "chat"` and return a reply as `reply`, `message`, `output`, `text`, or `response`.
+
+Client and matter screens show records returned by the connected database. Database errors are shown to the user; the app does not create replacement records when a save fails.
 
 ## System Specifications
 - **Client Architecture**: Single Page Application (SPA), React 18, TypeScript (strict mode)

@@ -20,7 +20,7 @@ export interface DispatchReceipt {
   timestamp: string;
   recipient: string;
   channel: 'WHATSAPP' | 'EMAIL' | 'INTERNAL_VAULT';
-  status: 'DELIVERED_SIMULATED_TEST' | 'SENT_REAL_TEST_PHONE' | 'SENT_LIVE_HTTP_SUCCESS' | 'FAILED_NETWORK_ERROR' | 'FAILED';
+  status: 'ACCEPTED_BY_GATEWAY' | 'FAILED';
   verificationUrl: string;
   messageBody: string;
   networkDetails?: {
@@ -42,7 +42,7 @@ export class DispatchAndCommsAgent {
    * Generates secure QR verification URL matching DocumentVerifyView
    */
   static generateVerificationUrl(docRef: string, clientName: string, amount: number = 0): string {
-    const baseUrl = 'http://localhost:3000/verify';
+    const baseUrl = `${import.meta.env.VITE_PUBLIC_APP_URL?.trim() || window.location.origin}/verify`;
     const params = new URLSearchParams({
       ref: docRef,
       cli: clientName,
@@ -105,9 +105,6 @@ _This message and accompanying legal document were generated and verified by Nya
           'http://localhost:5000/api/sendText'
         ];
 
-    console.log(`[DispatchAgent] Initiating Real Network Dispatch to Verified Test WhatsApp: +${targetPhone}`);
-    console.log(`[DispatchAgent] Message Content:\n${messageText}`);
-
     let lastError: string | undefined;
     let attemptedEndpoint = candidateEndpoints[0];
     let httpStatus: number | undefined;
@@ -160,7 +157,7 @@ _This message and accompanying legal document were generated and verified by Nya
             timestamp,
             recipient: `+${targetPhone}`,
             channel: 'WHATSAPP',
-            status: 'SENT_LIVE_HTTP_SUCCESS',
+            status: 'ACCEPTED_BY_GATEWAY',
             verificationUrl: verifyUrl,
             messageBody: messageText,
             networkDetails: {
@@ -188,7 +185,7 @@ _This message and accompanying legal document were generated and verified by Nya
       timestamp,
       recipient: `+${targetPhone}`,
       channel: 'WHATSAPP',
-      status: 'SENT_REAL_TEST_PHONE',
+      status: 'FAILED',
       verificationUrl: verifyUrl,
       messageBody: messageText,
       networkDetails: {
@@ -201,4 +198,3 @@ _This message and accompanying legal document were generated and verified by Nya
     };
   }
 }
-

@@ -1,0 +1,181 @@
+{
+  "firm_profile": {
+    "name": "Karani & Nyaga Advocates",
+    "brand": "Nyaga Agent AI Legal Operations",
+    "headquarters": "Riverside Green Suites, 4th Floor, Riverside Drive, Nairobi, Kenya",
+    "postal_address": "P.O. Box 72892-00200, Nairobi, Kenya",
+    "email_operations": "info@karanilaw.co.ke",
+    "managing_partners": [
+      {
+        "name": "Guyo Halake",
+        "role": "Senior Managing Partner & System Administrator",
+        "email": "guyohalakeofficial@gmail.com"
+      },
+      {
+        "name": "Nyagah Kithinji",
+        "role": "Managing Partner & Counsel",
+        "email": "advocate@kithinjilegal.co.ke"
+      }
+    ],
+    "practice_areas": [
+      "Commercial & Corporate Litigation",
+      "Construction Claims & Arbitration",
+      "Banking & Securities Enforcement",
+      "Environment and Land Court (ELC) Litigation",
+      "Tax Appeals & Special Tribunals (BPRT, RRT, TAT)",
+      "Conveyancing, Leases & Intellectual Property (KIPI)"
+    ]
+  },
+  "statutory_aro_schedules": {
+    "schedule_1_conveyancing": {
+      "title": "Schedule 1 — Conveyancing: Sales, Purchases, Mortgages & Charges",
+      "governing_law": "Advocates (Remuneration) Order, L.N. 35/2014 & Updates",
+      "currency": "KES",
+      "minimum_fee": 35000,
+      "scale_brackets": [
+        { "upto": 5000000, "rate_percent": 2.0, "description": "2% of consideration value up to KES 5,000,000 (Min KES 35,000)" },
+        { "upto": 10000000, "rate_percent": 1.5, "description": "1.5% on excess from 5M to 10M" },
+        { "upto": 50000000, "rate_percent": 1.0, "description": "1.0% on excess from 10M to 50M" },
+        { "upto": 100000000, "rate_percent": 0.75, "description": "0.75% on excess from 50M to 100M" },
+        { "upto": 500000000, "rate_percent": 0.5, "description": "0.5% on excess from 100M to 500M" },
+        { "upto": null, "rate_percent": 0.25, "description": "0.25% on consideration exceeding 500M (Min KES 1,000,000)" }
+      ]
+    },
+    "schedule_2_leases": {
+      "title": "Schedule 2 — Leases & Tenancies at a Rack Rent",
+      "governing_law": "Advocates (Remuneration) Order, Schedule 2",
+      "currency": "KES",
+      "scale_brackets": [
+        { "term": "under_1_year", "rate_percent": 7.5, "minimum": 15000, "basis": "Annual rack rent" },
+        { "term": "1_to_3_years", "rate_percent": 10.0, "minimum": 25000, "basis": "Annual rack rent" },
+        { "term": "exceeding_3_years", "rate_percent": 15.0, "minimum": 40000, "basis": "Annual rack rent" }
+      ]
+    },
+    "schedule_3_companies": {
+      "title": "Schedule 3 — Formation & Incorporation of Companies",
+      "scale_brackets": [
+        { "capital_upto": 1000000, "fee": 50000 },
+        { "capital_upto": 5000000, "fee": 75000 },
+        { "capital_upto": 20000000, "fee": 120000 },
+        { "capital_upto": null, "base_fee": 150000, "rate_on_excess": 0.001 }
+      ]
+    },
+    "schedule_4_ip": {
+      "title": "Schedule 4 — Trade Marks & Intellectual Property (KIPI)",
+      "fees": {
+        "search_and_advisory": 15000,
+        "trademark_registration_per_class": 30000,
+        "opposition_proceedings_minimum": 75000,
+        "renewal_per_class": 15000,
+        "assignment_per_mark": 25000
+      }
+    },
+    "schedule_5_chattels_and_advisory": {
+      "title": "Schedule 5 — General Advisory, Securities & Hourly Rates",
+      "hourly_rates_kes": {
+        "senior_managing_partner": 35000,
+        "partner": 25000,
+        "senior_associate": 15000,
+        "associate_advocate": 8000,
+        "pupil_or_legal_assistant": 4000
+      }
+    },
+    "schedule_6_high_court": {
+      "title": "Schedule 6 — High Court & Commercial Litigation",
+      "governing_law": "Legal Notice No. 35 of 2014 & Kenya Civil Procedure Act",
+      "currency": "KES",
+      "instruction_fee_minimum": 75000,
+      "instruction_fee_curve": [
+        { "threshold": 500000, "percent": 17.0, "cumulative_max": 85000 },
+        { "threshold": 1000000, "percent": 13.0, "cumulative_max": 150000 },
+        { "threshold": 5000000, "percent": 10.0, "cumulative_max": 550000 },
+        { "threshold": 10000000, "percent": 5.0, "cumulative_max": 800000 },
+        { "threshold": 20000000, "percent": 2.0, "cumulative_max": 1000000 },
+        { "threshold": null, "percent": 1.0, "description": "1% on all claim amounts exceeding KES 20,000,000" }
+      ],
+      "rules": {
+        "defendant_scale": "80% to 100% of Plaintiff's instruction fee depending on whether defence or counter-claim is filed",
+        "getting_up_fee": "One-third (33.33%) of the calculated instruction fee. Applicable whenever a substantive Defence is filed.",
+        "drawing_per_folio": 100,
+        "perusal_per_folio": 50,
+        "fair_copy_per_folio": 25,
+        "words_per_folio": 100,
+        "formal_court_attendance": 1500,
+        "substantive_hearing_per_hour": 5000,
+        "affidavit_of_service": 1500,
+        "statutory_vat_rate": 0.16
+      }
+    },
+    "schedule_7_magistrate": {
+      "title": "Schedule 7 — Subordinate & Magistrates Courts (Cap 21)",
+      "minimum_fee": 30000,
+      "rule": "Scales proportionally to 60-70% of High Court Schedule 6 tariffs for lower pecuniary jurisdictions."
+    },
+    "schedule_8_court_of_appeal": {
+      "title": "Schedule 8 — Court of Appeal Civil & Criminal Practice",
+      "rule": "Calculated as the equivalent High Court Schedule 6 fee plus a statutory one-third (33.33%) appellate surcharge."
+    },
+    "schedule_9_supreme_court": {
+      "title": "Schedule 9 — Supreme Court of Kenya Petitions",
+      "minimum_fee": 500000,
+      "rule": "Discretionary based on public importance, complexity, and constitutional value. Minimum baseline KES 500,000."
+    },
+    "schedule_10_probate": {
+      "title": "Schedule 10 — Probate & Estate Administration (Cap 160)",
+      "scale": [
+        { "upto": 2000000, "percent": 2.5, "minimum": 40000 },
+        { "upto": 10000000, "percent": 1.5 },
+        { "upto": null, "percent": 1.0 }
+      ]
+    },
+    "schedule_11_tribunals": {
+      "title": "Schedule 11 — Special Tribunals (BPRT, RRT, TAT, Energy, Co-operative)",
+      "rule": "75% of Subordinate Court or High Court rates based on claim amount."
+    },
+    "schedule_12_patents": {
+      "title": "Schedule 12 — Patents, Utility Models & Designs (KIPI)",
+      "base_filing": 100000,
+      "renewal_per_annum": 25000
+    }
+  },
+  "audit_and_taxation_rules": {
+    "party_and_party": {
+      "definition": "Costs awarded to the successful party payable by the losing party, taxed strictly on the ARO scale by the Taxing Master under Section 68 of the Civil Procedure Act.",
+      "taxing_master_items": [
+        "Item 1: Instruction Fee",
+        "Item 2: Getting-Up Fee (if Defence filed)",
+        "Item 3: Drawing Pleadings, Affidavits, Submissions (KES 100/folio)",
+        "Item 4: Perusing Opposing Pleadings & Exhibits (KES 50/folio)",
+        "Item 5: Attendances in Court (Mention / Hearing)",
+        "Item 6: Disbursements (Filing fees, CTS receipt, Process server)",
+        "Item 7: VAT (16% on professional fees only)"
+      ]
+    },
+    "advocate_and_client": {
+      "definition": "All fees and disbursements payable by a client to their retained advocate, including retainer fees and advisory outside statutory court awards.",
+      "statutory_demand_section_48": "An advocate cannot initiate recovery proceedings without delivering a signed bill of costs and waiting for 30 days statutory notice period under Section 48 of the Advocates Act."
+    }
+  },
+  "codebase_api_endpoints": {
+    "feenotes": {
+      "get_all": "GET /api/v1/feenotes",
+      "create": "POST /api/v1/feenotes",
+      "delete": "DELETE /api/v1/feenotes/{id}"
+    },
+    "payments": {
+      "get_all": "GET /api/v1/payments",
+      "paystack_confirm": "POST /api/v1/payments/paystack/confirm",
+      "daraja_stk_trigger": "POST /api/v1/payments/mpesa/stk-push"
+    },
+    "remuneration_calculator": {
+      "calculate": "POST /api/v1/remuneration/calculate"
+    },
+    "documents": {
+      "get_all": "GET /api/v1/documents",
+      "process_metadata": "POST /api/v1/documents/process-metadata"
+    },
+    "users_and_advocates": {
+      "get_all": "GET /api/v1/users"
+    }
+  }
+}

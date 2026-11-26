@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { SystemUser, getFeeNotes, getMatters, ExactFeeNoteRecord, ExactMatterRecord } from '../../services/supabase';
 import { fetchFirmUsers } from '../../services/data';
+import { showToast } from '../admin/ToastNotification';
 
 export interface ChatMessage {
   id: string;
@@ -68,8 +69,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ currentUser }) => {
 
   // Load colleagues on mount
   useEffect(() => {
+    if (!currentUser?.firmId) {
+      setColleagues([]);
+      return;
+    }
+
     let isMounted = true;
-    fetchFirmUsers(currentUser?.firmId || 'firm-001').then(users => {
+    fetchFirmUsers(currentUser.firmId).then(users => {
       if (isMounted) {
         // Exclude current user from colleague list
         const others = users.filter(u => u.id !== currentUser?.id && u.workEmail?.toLowerCase() !== currentUser?.workEmail?.toLowerCase());
@@ -78,6 +84,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ currentUser }) => {
           setSelectedColleague(others[0]);
         }
       }
+    }).catch(error => {
+      console.error('Failed to load firm colleagues:', error);
+      showToast('error', 'Could not load colleagues', error.message || 'Check your connection and permissions.');
     });
     return () => { isMounted = false; };
   }, [currentUser]);

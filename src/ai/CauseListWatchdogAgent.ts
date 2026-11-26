@@ -15,7 +15,7 @@ export interface CauseListEntry {
 
 export interface WatchdogMatchResult {
   scanTimestamp: string;
-  totalListsScanned: number;
+  totalEntriesScanned: number;
   matchedMattersCount: number;
   matches: {
     caseNo: string;
@@ -27,62 +27,17 @@ export interface WatchdogMatchResult {
 }
 
 /**
- * Agent 4: Cause List Watchdog Agent
- * Scrapes & monitors Milimani High Court, ELC, Court of Appeal daily cause lists
- * and syncs hearing dates, courtroom numbers, and Teams links directly with the firm's matters.
+ * Matches a published cause-list feed against matters supplied by the firm.
  */
 export class CauseListWatchdogAgent {
   /**
-   * Mock / Live parser of daily cause lists against active firm matters
+   * Matches entries from a verified cause-list source against active matters.
    */
-  static scanDailyCauseLists(activeFirmMatters: { caseNo: string; title: string; advocateAssigned: string }[]): WatchdogMatchResult {
+  static scanDailyCauseLists(
+    activeFirmMatters: { caseNo: string; title: string; advocateAssigned: string }[],
+    publishedLists: CauseListEntry[],
+  ): WatchdogMatchResult {
     const todayStr = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-
-    // Live daily cause list entries (Milimani Commercial & ELC)
-    const publishedLists: CauseListEntry[] = [
-      {
-        id: 'cl-01',
-        date: todayStr,
-        courtForum: 'High Court Commercial & Tax Division — Milimani',
-        presidingJudge: 'Hon. Justice Alfred Mabeya, FCIArb',
-        courtroom: 'Court No. 1 (Virtual Session)',
-        caseNumber: 'HCCOMM E547 of 2024',
-        parties: 'Zhenjian Chengjian Construction Africa Ltd v Eighty Eight Nairobi Ltd & Anor',
-        matterStage: 'DIRECTIONS',
-        teamsMeetingLink: 'https://teams.microsoft.com/l/meetup-join/judiciary-ke-milimani-comm-court1',
-        timeSlot: '09:00 AM',
-        advocateOnRecord: 'Nyagah B. Kithinji & Co. Advocates',
-        status: 'PENDING_TODAY'
-      },
-      {
-        id: 'cl-02',
-        date: todayStr,
-        courtForum: 'Arbitral Tribunal at Nairobi',
-        presidingJudge: 'Arch. Nekoye Masibili, MCIArb (Sole Arbitrator)',
-        courtroom: 'Arbitration Chambers / Virtual Teams',
-        caseNumber: 'Under Arbitration Act 1995',
-        parties: 'Dhanya Construction Kenya Ltd v Sunil Shah',
-        matterStage: 'TAXATION',
-        teamsMeetingLink: 'https://teams.microsoft.com/l/meetup-join/arbitration-nairobi-chambers',
-        timeSlot: '11:30 AM',
-        advocateOnRecord: 'Nyagah B. Kithinji & Co. Advocates',
-        status: 'PENDING_TODAY'
-      },
-      {
-        id: 'cl-03',
-        date: todayStr,
-        courtForum: 'High Court Environment & Land Court — Milimani',
-        presidingJudge: 'Hon. Lady Justice J. Mumo',
-        courtroom: 'Court No. 4 Ground Floor',
-        caseNumber: 'ELC E109 of 2024',
-        parties: 'Greenhills Investment Ltd v Nairobi City County & 2 Others',
-        matterStage: 'RULING',
-        timeSlot: '02:15 PM',
-        advocateOnRecord: 'Nyagah B. Kithinji & Co. Advocates',
-        status: 'PENDING_TODAY'
-      }
-    ];
-
     const matches: WatchdogMatchResult['matches'] = [];
 
     publishedLists.forEach(entry => {
@@ -103,10 +58,8 @@ export class CauseListWatchdogAgent {
     });
 
     const briefingText = `
-📅 *DAILY JUDICIARY CAUSE LIST BRIEFING — ${todayStr.toUpperCase()}*
-_Nyagah B. Kithinji & Co. Advocates · High Court & Arbitration Diary_
-
-Adv. Nyagah, your firm has *${matches.length} matters* listed for court today:
+DAILY CAUSE-LIST MATCHES — ${todayStr.toUpperCase()}
+Matched ${matches.length} entries from the supplied published list:
 
 ${matches.map((m, idx) => `
 ${idx + 1}. *${m.entry.caseNumber}* — _${m.matterTitle}_
@@ -117,16 +70,14 @@ ${idx + 1}. *${m.entry.caseNumber}* — _${m.matterTitle}_
    ${m.entry.teamsMeetingLink ? `🔗 *Teams Link:* ${m.entry.teamsMeetingLink}` : '📍 Physical Court Attendance Required'}
 `).join('\n')}
 
-_Cause list scanned autonomously by Watchdog Agent at 06:30 AM._
     `.trim();
 
     return {
       scanTimestamp: new Date().toISOString(),
-      totalListsScanned: 18,
+      totalEntriesScanned: publishedLists.length,
       matchedMattersCount: matches.length,
       matches,
       briefingText
     };
   }
 }
-

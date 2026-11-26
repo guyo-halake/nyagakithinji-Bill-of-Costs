@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, Phone, Mail, MapPin, 
+  Users, Phone, Mail, MapPin, Search,
   MessageCircle, FileText, Plus, 
-  ExternalLink, Clock, ShieldCheck, X
+  ExternalLink, X
 } from 'lucide-react';
 
 interface AdminClientCrmViewProps {
@@ -27,6 +27,9 @@ export const AdminClientCrmView: React.FC<AdminClientCrmViewProps> = ({
   const [activeNoteClient, setActiveNoteClient] = useState<string | null>(null);
   const [currentNoteText, setCurrentNoteText] = useState('');
   const [showAddClientModal, setShowAddClientModal] = useState(false);
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [clientStatusFilter, setClientStatusFilter] = useState<'all' | 'active' | 'progress' | 'portfolio'>('all');
+  const [expandedActivityClient, setExpandedActivityClient] = useState<string | null>(null);
 
   // New Client Form
   const [newClientName, setNewClientName] = useState('');
@@ -147,6 +150,19 @@ export const AdminClientCrmView: React.FC<AdminClientCrmViewProps> = ({
     }
   ];
 
+  const getClientCategory = (client: typeof clients[number]) => {
+    const status = client.status.toLowerCase();
+    if (status.includes('active paying')) return 'active';
+    if (status.includes('progress')) return 'progress';
+    return 'portfolio';
+  };
+  const normalizedClientSearch = clientSearchQuery.trim().toLowerCase();
+  const visibleClients = clients.filter(client => {
+    const matchesStatus = clientStatusFilter === 'all' || getClientCategory(client) === clientStatusFilter;
+    const searchable = `${client.name} ${client.company} ${client.phone} ${client.email} ${client.location} ${client.status} ${client.projectName}`.toLowerCase();
+    return matchesStatus && (!normalizedClientSearch || searchable.includes(normalizedClientSearch));
+  });
+
   const handleSaveNote = (clientId: string) => {
     const updated = { ...clientNotes, [clientId]: currentNoteText };
     setClientNotes(updated);
@@ -163,8 +179,15 @@ export const AdminClientCrmView: React.FC<AdminClientCrmViewProps> = ({
   };
 
   const handleSendWhatsApp = (client: typeof clients[0]) => {
+    let phone = client.phone.replace(/\D/g, '');
+    if (phone.startsWith('2540')) phone = `254${phone.slice(4)}`;
+    else if (phone.startsWith('0')) phone = `254${phone.slice(1)}`;
+    if (!/^254[17]\d{8}$/.test(phone)) {
+      showToast(`WhatsApp is unavailable because ${client.name} does not have a valid Kenyan mobile number.`);
+      return;
+    }
     const text = encodeURIComponent(`Hi ${client.name.split(' ')[0]}, this is Guyo Halake from P3L Developers regarding ${client.projectName}. Hope everything is running smoothly!`);
-    window.open(`https://wa.me/${client.phone.replace(/[^0-9]/g, '')}?text=${text}`, '_blank');
+    window.open(`https://wa.me/${phone}?text=${text}`, '_blank', 'noopener,noreferrer');
     showToast(`Opening WhatsApp Web for ${client.name}...`);
   };
 
@@ -179,11 +202,11 @@ export const AdminClientCrmView: React.FC<AdminClientCrmViewProps> = ({
               Clients
             </h2>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-              5 Accounts
+              {clients.length} Accounts
             </span>
           </div>
           <p className="text-xs text-zinc-500 mt-1">
-            Client contacts, WhatsApp messages, and monthly retainer details
+            Client contacts, agreements, payment summaries, and recent activity
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -197,105 +220,184 @@ export const AdminClientCrmView: React.FC<AdminClientCrmViewProps> = ({
         </div>
       </div>
 
-      {/* 5 Real Client Profile Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-sans">
-        {clients.map((c) => (
-          <div 
-            key={c.id} 
-            className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col justify-between space-y-4 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all"
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { key: 'all', label: 'All accounts', count: clients.length },
+          { key: 'active', label: 'Active', count: clients.filter(client => getClientCategory(client) === 'active').length },
+          { key: 'progress', label: 'In progress', count: clients.filter(client => getClientCategory(client) === 'progress').length },
+          { key: 'portfolio', label: 'Portfolio', count: clients.filter(client => getClientCategory(client) === 'portfolio').length },
+        ].map(metric => (
+          <button
+            key={metric.key}
+            type="button"
+            onClick={() => setClientStatusFilter(metric.key as typeof clientStatusFilter)}
+            className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+              clientStatusFilter === metric.key
+                ? 'border-emerald-500/60 bg-emerald-500/5'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-600'
+            }`}
           >
-            <div className="space-y-3">
-              {/* Card Header with Health Score Ring */}
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="font-bold text-sm text-zinc-900 dark:text-white">{c.name}</h3>
-                  <p className="text-xs font-semibold text-zinc-500">{c.company}</p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2.5 h-2.5 rounded-full ${c.health === 'green' ? 'bg-emerald-500' : c.health === 'amber' ? 'bg-amber-500' : 'bg-zinc-400'}`}></span>
-                  <span className="font-mono text-[10px] font-bold text-zinc-500">{c.healthScore}%</span>
-                </div>
-              </div>
-
-              {/* Status Badge */}
-              <div>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${c.health === 'green' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : c.health === 'amber' ? 'bg-amber-500/10 text-amber-600' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>
-                  {c.status}
-                </span>
-              </div>
-
-              {/* Contact Information */}
-              <div className="space-y-1.5 text-xs text-zinc-600 dark:text-zinc-400 font-mono text-[11px]">
-                <div className="flex items-center gap-2">
-                  <Phone className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>{c.phone}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Mail className="w-3.5 h-3.5 text-zinc-400" />
-                  <span className="truncate">{c.email}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-3.5 h-3.5 text-zinc-400" />
-                  <span className="truncate">{c.location}</span>
-                </div>
-              </div>
-
-              {/* Contract Terms */}
-              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800/60 text-[11px] space-y-1">
-                <span className="text-[10px] font-mono text-zinc-400 uppercase block">Agreed Contract</span>
-                <p className="text-zinc-900 dark:text-white font-medium" dangerouslySetInnerHTML={{ __html: c.contract }} />
-                <div className="flex justify-between pt-1 border-t border-zinc-200/50 dark:border-zinc-800 font-mono text-[10px]">
-                  <span className="text-zinc-400">Total Settled:</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">{c.totalPaid}</span>
-                </div>
-              </div>
-
-              {/* Recent Activity */}
-              <div className="space-y-1 pt-1">
-                <span className="text-[10px] font-mono text-zinc-400 uppercase block">Recent Touchpoints</span>
-                <div className="space-y-1 text-[11px] text-zinc-500">
-                  {c.activity.slice(0, 2).map((act, i) => (
-                    <p key={i} className="truncate">&bull; {act}</p>
-                  ))}
-                </div>
-              </div>
-
-              {/* Saved Notes Snippet */}
-              {clientNotes[c.id] && (
-                <div className="p-2.5 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 text-[11px] text-amber-900 dark:text-amber-200">
-                  <span className="font-bold block text-[10px] uppercase font-mono text-amber-700 dark:text-amber-400">Client Note:</span>
-                  <p className="italic">"{clientNotes[c.id]}"</p>
-                </div>
-              )}
-            </div>
-
-            {/* Action Bar */}
-            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 font-mono text-xs">
-              <button 
-                onClick={() => handleSendWhatsApp(c)}
-                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1.5 cursor-pointer"
-              >
-                <MessageCircle className="w-3.5 h-3.5" />
-                WhatsApp
-              </button>
-
-              <button 
-                onClick={() => handleOpenNote(c.id)}
-                className="px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-semibold text-[11px] cursor-pointer"
-              >
-                Notes
-              </button>
-
-              <button 
-                onClick={() => onOpenDossier(c.projectId)}
-                className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
-              >
-                Dossier
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
+            <span className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{metric.label}</span>
+            <span className="mt-1 block text-lg font-bold text-zinc-900 dark:text-white">{metric.count}</span>
+          </button>
         ))}
+      </div>
+
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <label className="flex max-w-lg flex-1 items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-zinc-400 focus-within:border-emerald-500">
+          <Search className="h-4 w-4 shrink-0" />
+          <input
+            type="search"
+            value={clientSearchQuery}
+            onChange={event => setClientSearchQuery(event.target.value)}
+            placeholder="Search clients, companies, contacts"
+            aria-label="Search clients"
+            className="w-full bg-transparent text-xs text-zinc-900 dark:text-white placeholder:text-zinc-400 outline-none"
+          />
+          {clientSearchQuery && (
+            <button type="button" onClick={() => setClientSearchQuery('')} aria-label="Clear client search">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </label>
+        <p className="text-[11px] text-zinc-500">
+          Showing <strong className="text-zinc-700 dark:text-zinc-300">{visibleClients.length}</strong> of {clients.length} accounts
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1100px] text-left text-xs">
+            <thead className="bg-zinc-50 dark:bg-zinc-800/70 text-[10px] uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th scope="col" className="px-4 py-3 font-semibold">Client</th>
+                <th scope="col" className="px-4 py-3 font-semibold">Contact</th>
+                <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+                <th scope="col" className="px-4 py-3 font-semibold">Agreement</th>
+                <th scope="col" className="px-4 py-3 font-semibold">Paid to date</th>
+                <th scope="col" className="px-4 py-3 font-semibold">Recent activity</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {visibleClients.map(client => (
+                <React.Fragment key={client.id}>
+                  <tr className="align-top hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30">
+                    <td className="px-4 py-3.5">
+                      <p className="font-semibold text-zinc-900 dark:text-white">{client.name}</p>
+                      <p className="mt-0.5 text-[11px] text-zinc-500">{client.company}</p>
+                      <p className="mt-1 flex items-center gap-1 text-[10px] text-zinc-400">
+                        <MapPin className="h-3 w-3" />{client.location}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <a href={`tel:${client.phone}`} className="flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300 hover:text-emerald-600">
+                        <Phone className="h-3 w-3 text-zinc-400" />{client.phone}
+                      </a>
+                      <a href={`mailto:${client.email}`} className="mt-1 flex max-w-[190px] items-center gap-1.5 truncate text-[11px] text-zinc-500 hover:text-emerald-600">
+                        <Mail className="h-3 w-3 shrink-0 text-zinc-400" />{client.email}
+                      </a>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className={`inline-flex max-w-[180px] rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                        getClientCategory(client) === 'active'
+                          ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                          : getClientCategory(client) === 'progress'
+                            ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                            : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+                      }`}>
+                        {client.status.replace(/&middot;/g, '·')}
+                      </span>
+                    </td>
+                    <td className="max-w-[240px] px-4 py-3.5 text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300">
+                      {client.contract.replace(/&middot;/g, '·')}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {/^\s*KES\s[\d,]+(?:\.\d{1,2})?\s*$/i.test(client.totalPaid) ? (
+                        <span className="font-semibold text-zinc-800 dark:text-zinc-200">{client.totalPaid}</span>
+                      ) : (
+                        <span className="text-[11px] text-zinc-500" title={client.totalPaid}>Not recorded as a cash total</span>
+                      )}
+                    </td>
+                    <td className="max-w-[230px] px-4 py-3.5">
+                      <p className="text-[10px] font-medium text-zinc-400">{client.lastContact}</p>
+                      <p className="mt-1 truncate text-[11px] text-zinc-600 dark:text-zinc-400" title={client.activity[0]}>
+                        {client.activity[0]}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedActivityClient(value => value === client.id ? null : client.id)}
+                        className="mt-1 text-[10px] font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
+                        aria-expanded={expandedActivityClient === client.id}
+                      >
+                        {expandedActivityClient === client.id ? 'Hide history' : `View history (${client.activity.length})`}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleSendWhatsApp(client)}
+                          title={`Message ${client.name} on WhatsApp`}
+                          aria-label={`WhatsApp ${client.name}`}
+                          className="rounded-lg border border-emerald-200 dark:border-emerald-900/70 p-2 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenNote(client.id)}
+                          title={`Notes for ${client.name}`}
+                          aria-label={`Open notes for ${client.name}`}
+                          className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-2 text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onOpenDossier(client.projectId)}
+                          title={`Open ${client.name} dossier`}
+                          aria-label={`Open dossier for ${client.name}`}
+                          className="rounded-lg bg-zinc-900 p-2 text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedActivityClient === client.id && (
+                    <tr className="bg-zinc-50/70 dark:bg-zinc-800/20">
+                      <td colSpan={7} className="px-5 py-3">
+                        <ul className="grid gap-2 md:grid-cols-2">
+                          {client.activity.map((activity, index) => (
+                            <li key={`${client.id}-activity-${index}`} className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+                              <span className="mr-2 text-emerald-600 dark:text-emerald-400">•</span>{activity}
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+              {visibleClients.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center">
+                    <Search className="mx-auto h-6 w-6 text-zinc-400" />
+                    <p className="mt-3 text-sm font-semibold text-zinc-800 dark:text-zinc-200">No clients match these filters</p>
+                    <button
+                      type="button"
+                      onClick={() => { setClientSearchQuery(''); setClientStatusFilter('all'); }}
+                      className="mt-3 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Persistent Note Modal */}

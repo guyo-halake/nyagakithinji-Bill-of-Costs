@@ -3,13 +3,39 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?Set VITE_SUPABASE_URL in the environment}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?Set VITE_SUPABASE_ANON_KEY in the environment}
+        VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:-}
     container_name: karani-law-frontend
     ports:
-      - "${FRONTEND_PORT:-3001}:80"
+      - "${FRONTEND_PORT:-3003}:80"
     environment:
       - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      - payment-gateway
     restart: always
+    networks:
+      - frontend
+      - backend
+  payment-gateway:
+    build:
+      context: ./backend/payment_gateway
+      dockerfile: Dockerfile
+    environment:
+      SUPABASE_URL: ${VITE_SUPABASE_URL:?Set VITE_SUPABASE_URL in the environment}
+      SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?Set VITE_SUPABASE_ANON_KEY in the environment}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+    ports:
+      - "127.0.0.1:${PAYMENT_GATEWAY_PORT:-8001}:8000"
+    restart: always
+    networks:
+      - backend
 
 networks:
-  default:
+  frontend:
     name: karani-frontend-network
+  backend:
+    name: lexflow-network
+    external: true

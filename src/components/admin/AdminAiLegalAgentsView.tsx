@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { 
   Bot, Scale, Zap, Send, FileText, CheckCircle2, 
   AlertTriangle, ShieldCheck, Clock, Search, ArrowRight,
@@ -15,47 +16,51 @@ import {
   DispatchReceipt,
   WatchdogMatchResult
 } from '../../ai';
+import { ExtractedLitigationPleading, StatutoryBillLineItem } from '../../ai/TaxationDrafterAgent';
+import { CauseListEntry } from '../../ai/CauseListWatchdogAgent';
+import { fetchMatters } from '../../services/data';
+import { ExactMatterRecord, SystemUser } from '../../services/supabase';
 
 interface AdminAiLegalAgentsViewProps {
   showToast: (msg: string) => void;
+  currentUser: SystemUser;
 }
 
-export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ showToast }) => {
+export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ showToast, currentUser }) => {
   const [activeAgentTab, setActiveAgentTab] = useState<'drafter' | 'auditor' | 'dispatcher' | 'watchdog'>('drafter');
-  
-  // Real active firm matters
-  const firmMatters = [
-    {
-      id: 'seyani',
-      title: 'Seyani Brothers & Co. (K) Ltd v Greenhills Investment Ltd',
-      caseNo: 'Under Arbitration Act 1995',
-      forum: 'Arbitral Tribunal at Nairobi',
-      claimValue: 116000000.00,
-      advocateAssigned: 'Adv. Nyagah B. Kithinji',
-      pleadingsCount: 250
-    },
-    {
-      id: 'dhanya',
-      title: 'Dhanya Construction Kenya Ltd v Sunil Shah',
-      caseNo: 'Under Arbitration Act 1995',
-      forum: 'Arbitral Tribunal at Nairobi (Arch. Nekoye Masibili)',
-      claimValue: 3986663.93,
-      advocateAssigned: 'Adv. Nyagah B. Kithinji',
-      pleadingsCount: 226
-    },
-    {
-      id: 'hccomm',
-      title: 'Zhenjian Chengjian Construction Africa Ltd v Eighty Eight Nairobi Ltd & Anor',
-      caseNo: 'HCCOMM E547 of 2024',
-      forum: 'High Court Commercial Division — Milimani',
-      claimValue: 45000000.00,
-      advocateAssigned: 'Adv. Nyagah B. Kithinji',
-      pleadingsCount: 19
-    }
-  ];
+  const [firmMatters, setFirmMatters] = useState<ExactMatterRecord[]>([]);
+  const [mattersLoadError, setMattersLoadError] = useState('');
+  const [selectedMatterId, setSelectedMatterId] = useState('');
+  const selectedMatter = firmMatters.find(m => m.id === selectedMatterId);
+  const [pleadingsText, setPleadingsText] = useState('');
+  const [opponentItems, setOpponentItems] = useState<StatutoryBillLineItem[]>([]);
+  const [opponentFirm, setOpponentFirm] = useState('');
+  const [auditInputError, setAuditInputError] = useState('');
+  const [watchdogError, setWatchdogError] = useState('');
 
-  const [selectedMatterId, setSelectedMatterId] = useState<string>('seyani');
-  const selectedMatter = firmMatters.find(m => m.id === selectedMatterId) || firmMatters[0];
+  useEffect(() => {
+    let active = true;
+    if (!currentUser.firmId) {
+      setMattersLoadError('Your firm account could not be verified.');
+      return;
+    }
+
+    fetchMatters(currentUser.firmId)
+      .then(records => {
+        if (!active) return;
+        const openMatters = records.filter(matter => matter.statusClass !== 'closed');
+        setFirmMatters(openMatters);
+        setSelectedMatterId(openMatters[0]?.id || '');
+        setMattersLoadError('');
+      })
+      .catch(error => {
+        if (!active) return;
+        setFirmMatters([]);
+        setMattersLoadError(error instanceof Error ? error.message : 'Could not load your firm matters.');
+      });
+
+    return () => { active = false; };
+  }, [currentUser.firmId]);
 
   // Agent 1: Drafter Output State
   const [drafterOutput, setDrafterOutput] = useState<GeneratedBillOfCosts | null>(null);
@@ -68,11 +73,10 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
   // Agent 3: Dispatcher State
   const [dispatchReceipt, setDispatchReceipt] = useState<DispatchReceipt | null>(null);
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
-  const [wahaEndpointUrl, setWahaEndpointUrl] = useState<string>('https://september-newspaper-default-alabama.trycloudflare.com/api/sendText');
-  const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>('https://p3lautomate.app.n8n.cloud/webhook/whatsapp-odin-inbound');
+  const [wahaEndpointUrl, setWahaEndpointUrl] = useState<string>(NYAGAH_AI_CONFIG.wahaApiUrl);
+  const [n8nWebhookUrl, setN8nWebhookUrl] = useState<string>(NYAGAH_AI_CONFIG.n8nWebhookUrl);
   const [selectedChannelMode, setSelectedChannelMode] = useState<'waha' | 'n8n' | 'custom'>('waha');
-  const [customGatewayUrl, setCustomGatewayUrl] = useState<string>('http://localhost:5000/api/sendText');
-  const [rawN8nWorkflowPreview, setRawN8nWorkflowPreview] = useState<boolean>(false);
+  const [customGatewayUrl, setCustomGatewayUrl] = useState<string>('');
 
   // Agent 4: Watchdog State
   const [watchdogResult, setWatchdogResult] = useState<WatchdogMatchResult | null>(null);
@@ -80,63 +84,125 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
 
   // Run Agent 1: Drafter
   const handleRunDrafter = () => {
+    if (!selectedMatter) {
+      showToast('Load a real firm matter before drafting a bill.');
+      return;
+    }
+    if (!Number.isFinite(selectedMatter.amount) || selectedMatter.amount <= 0) {
+      showToast('This matter has no recorded claim value. Add one before drafting.');
+      return;
+    }
+    const pleadings: ExtractedLitigationPleading[] = pleadingsText
+      .split(/\r?\n/)
+      .map(line => line.split('|').map(value => value.trim()))
+      .filter(parts => parts.some(Boolean))
+      .map(([date = '', particulars = '', folios = '']) => ({
+        date,
+        documentType: particulars,
+        particulars,
+        folios: Number(folios),
+        courtForum: selectedMatter.forum,
+      }));
+    if (!pleadings.length || pleadings.some(item => !item.particulars || !Number.isInteger(item.folios) || item.folios < 0)) {
+      showToast('Enter actual case activities as date | description | folios, one per line.');
+      return;
+    }
+
     setIsDrafting(true);
-    showToast(`Taxation Drafter Agent: Analyzing court record for ${selectedMatter.title.split('v')[0]}...`);
-
-    setTimeout(() => {
-      const mockPleadings = [
-        { date: '12.04.2021', documentType: 'Notice of Dispute', particulars: 'Notice of Dispute & Request for Arbitration (8 folios)', folios: 8, courtForum: selectedMatter.forum },
-        { date: '20.06.2021', documentType: 'Statement of Claim', particulars: 'Statement of Claim (48 folios)', folios: 48, courtForum: selectedMatter.forum },
-        { date: '14.09.2021', documentType: 'Reply to Defence', particulars: 'Reply to Defence and Defence to Counterclaim (32 folios)', folios: 32, courtForum: selectedMatter.forum },
-        { date: '04.11.2021', documentType: 'Preliminary Meeting', particulars: 'Preliminary Meeting before Arbitrator for directions', folios: 0, courtForum: selectedMatter.forum, attendancesCount: 1, durationHours: 3 },
-        { date: '18.01.2022', documentType: 'Trial Bundle', particulars: 'Claimant Trial Bundle of Documents (420 folios)', folios: 420, courtForum: selectedMatter.forum },
-        { date: '22.03.2022', documentType: 'Substantive Hearing', particulars: 'Substantive arbitral hearing — Day 1: Claimant Witness examination', folios: 0, courtForum: selectedMatter.forum, attendancesCount: 1, durationHours: 6 }
-      ];
-
+    try {
       const res = TaxationDrafterAgent.draftStatutoryBill({
         matterId: selectedMatter.id,
         matterTitle: selectedMatter.title,
         caseNo: selectedMatter.caseNo,
         forum: selectedMatter.forum,
-        claimValue: selectedMatter.claimValue,
-        pleadings: mockPleadings
+        claimValue: selectedMatter.amount,
+        pleadings,
       });
 
       setDrafterOutput(res);
+      showToast(`Draft prepared from ${pleadings.length} entered case activities. Check the rates and facts before use.`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not prepare this draft.');
+    } finally {
       setIsDrafting(false);
-      showToast(`✓ Compiled Schedule 6 Bill of Costs: KES ${res.grandTotalClaimed.toLocaleString()}`);
-    }, 1200);
+    }
   };
 
   // Run Agent 2: Opposition Auditor
+  const handleLoadOpponentBill = async (file?: File) => {
+    if (!file) return;
+    setAuditInputError('');
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer());
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!firstSheet) throw new Error('The selected file has no worksheet.');
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '' });
+      const normalize = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, '');
+      const items = rows.map((row, index) => {
+        const values = new Map(Object.entries(row).map(([key, value]) => [normalize(key), value]));
+        const particulars = String(values.get('particulars') || values.get('description') || '').trim();
+        const amount = Number(values.get('amountclaimed') || values.get('amount') || '');
+        const category = String(values.get('category') || '').toUpperCase() as StatutoryBillLineItem['category'];
+        const validCategories: StatutoryBillLineItem['category'][] = ['INSTRUCTION', 'GETTING_UP', 'DRAWING', 'PERUSAL', 'ATTENDANCE', 'DISBURSEMENT'];
+        if (!particulars || !Number.isFinite(amount) || amount < 0 || !validCategories.includes(category)) {
+          throw new Error(`Row ${index + 2} needs particulars, a non-negative amount, and a valid category.`);
+        }
+        const itemNo = String(values.get('itemno') || index + 1);
+        return {
+          id: `opponent-${index + 1}`,
+          itemNo,
+          date: String(values.get('date') || ''),
+          particulars,
+          statutoryItemCode: String(values.get('statutoryitemcode') || ''),
+          amountClaimed: amount,
+          amountTaxedOff: 0,
+          netAllowed: amount,
+          category,
+          statutoryNote: '',
+        };
+      });
+      if (!items.length) throw new Error('The selected file contains no bill items.');
+      setOpponentItems(items);
+      setAuditorOutput(null);
+    } catch (error) {
+      setOpponentItems([]);
+      setAuditInputError(error instanceof Error ? error.message : 'Could not read the selected bill.');
+    }
+  };
+
   const handleRunAuditor = () => {
+    if (!selectedMatter || opponentItems.length === 0 || !opponentFirm.trim()) {
+      setAuditInputError('Choose a firm matter, enter the opposing firm, and upload the actual bill of costs.');
+      return;
+    }
     setIsAuditing(true);
-    showToast(`Opposition Auditor Agent: Scanning opponent's bill for excessive folios & deductions...`);
-
-    setTimeout(() => {
-      // Create mock opponent items
-      const opponentItems = [
-        { id: '1', itemNo: '1', date: '02.04.2024', particulars: 'To receiving instructions to act for Plaintiff in KES 45M suit', statutoryItemCode: 'SCH6', amountClaimed: 2450000, amountTaxedOff: 0, netAllowed: 2450000, category: 'INSTRUCTION' as const, statutoryNote: '' },
-        { id: '2', itemNo: '2', date: '10.05.2024', particulars: 'To drawing Chamber Summons for interlocutory injunction (45 folios claimed)', statutoryItemCode: 'SCH6', amountClaimed: 6750, amountTaxedOff: 0, netAllowed: 6750, category: 'DRAWING' as const, statutoryNote: '' },
-        { id: '3', itemNo: '3', date: '20.06.2024', particulars: 'To attending virtual court mention before Registrar', statutoryItemCode: 'SCH6', amountClaimed: 4500, amountTaxedOff: 0, netAllowed: 4500, category: 'ATTENDANCE' as const, statutoryNote: '' },
-        { id: '4', itemNo: '4', date: '15.08.2024', particulars: 'Getting up fees for trial (exceeding statutory 33.3% limit)', statutoryItemCode: 'SCH6', amountClaimed: 1200000, amountTaxedOff: 0, netAllowed: 1200000, category: 'GETTING_UP' as const, statutoryNote: '' }
-      ];
-
+    setAuditInputError('');
+    try {
       const audit = OppositionAuditorAgent.auditOpposingBill({
         matterTitle: selectedMatter.title,
-        opposingFirm: 'Kaplan & Stratton Advocates (Opposing Counsel)',
+        opposingFirm: opponentFirm,
         items: opponentItems,
-        claimValue: selectedMatter.claimValue
       });
 
       setAuditorOutput(audit);
+      showToast('Rule-based review prepared from the uploaded bill. Have counsel verify every finding and citation.');
+    } catch (error) {
+      setAuditInputError(error instanceof Error ? error.message : 'Could not review this bill.');
+    } finally {
       setIsAuditing(false);
-      showToast(`✓ Opposition Audit Complete: Identified -KES ${audit.totalRecommendedTaxOff.toLocaleString()} in statutory deductions!`);
-    }, 1400);
+    }
   };
 
   // Run Agent 3: Dispatcher (Safely sends to internal developer phone +254768141129 first)
   const handleRunDispatcher = async () => {
+    if (!selectedMatter || drafterOutput?.matterId !== selectedMatter.id) {
+      showToast('Prepare a draft from this matter before sending a message.');
+      return;
+    }
+    if (!window.confirm(`Send a WhatsApp message to the configured internal test number ${NYAGAH_AI_CONFIG.testPhoneNumber}?`)) {
+      return;
+    }
+
     setIsDispatching(true);
     const targetUrl = selectedChannelMode === 'waha' 
       ? wahaEndpointUrl 
@@ -144,7 +210,7 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
         ? n8nWebhookUrl 
         : customGatewayUrl;
 
-    showToast(`Dispatch Agent: Generating verified document & pinging live endpoint: ${targetUrl}...`);
+    showToast(`Sending the message to the internal test number through the selected gateway.`);
 
     try {
       const receipt = await DispatchAndCommsAgent.dispatchToWhatsApp({
@@ -152,19 +218,17 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
         recipientPhone: NYAGAH_AI_CONFIG.testPhoneNumber,
         matterTitle: selectedMatter.title,
         documentType: 'BILL_OF_COSTS',
-        documentRef: `TAX-${selectedMatter.id.toUpperCase()}-2026`,
-        amountDue: 245000,
-        courtDate: '18th November 2026',
-        courtroom: 'Milimani Commercial Court 1',
-        summaryMessage: 'The Party & Party Bill of Costs under Schedule 6 has been verified and compiled. Please review the attached breakdown and statutory grounds.'
+        documentRef: `TAX-${selectedMatter.caseNo || selectedMatter.id}`,
+        amountDue: drafterOutput.grandTotalClaimed,
+        summaryMessage: `A draft bill of costs for ${selectedMatter.title} is ready for review. It is not a filed or approved bill.`
       }, targetUrl);
 
       setDispatchReceipt(receipt);
 
-      if (receipt.status === 'SENT_LIVE_HTTP_SUCCESS') {
-        showToast(`✓ Live WhatsApp Gateway HTTP 200 OK! Delivered to ${NYAGAH_AI_CONFIG.testPhoneNumber}`);
+      if (receipt.status === 'ACCEPTED_BY_GATEWAY') {
+        showToast(`The gateway accepted the message for ${NYAGAH_AI_CONFIG.testPhoneNumber}. Delivery is not confirmed.`);
       } else {
-        showToast(`✓ Document stamped & queued for ${NYAGAH_AI_CONFIG.testPhoneNumber} (Gateway HTTP status: ${receipt.networkDetails?.httpStatus || 'offline'})`);
+        showToast(`The message was not accepted by the gateway. ${receipt.networkDetails?.error || ''}`);
       }
     } catch (err: any) {
       showToast(`Dispatch attempted: ${err?.message || 'Error executing dispatch'}`);
@@ -174,22 +238,32 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
   };
 
   // Run Agent 4: Watchdog
-  const handleRunWatchdog = () => {
+  const handleRunWatchdog = async () => {
     setIsScanningWatchdog(true);
-    showToast('Cause List Watchdog Agent: Scraping daily Milimani & ELC cause lists...');
-
-    setTimeout(() => {
-      const activeMatters = firmMatters.map(m => ({
-        caseNo: m.caseNo,
-        title: m.title,
-        advocateAssigned: m.advocateAssigned
-      }));
-
-      const res = CauseListWatchdogAgent.scanDailyCauseLists(activeMatters);
-      setWatchdogResult(res);
+    setWatchdogResult(null);
+    setWatchdogError('');
+    try {
+      const response = await fetch('/api/v1/cause-lists/today');
+      if (!response.ok) throw new Error('A verified court cause-list feed is not connected.');
+      const data = await response.json();
+      if (!Array.isArray(data?.entries) || !firmMatters.length) {
+        throw new Error('The court-list service returned an unexpected response.');
+      }
+      const entries = data.entries as CauseListEntry[];
+      const result = CauseListWatchdogAgent.scanDailyCauseLists(
+        firmMatters.map(matter => ({
+          caseNo: matter.caseNo,
+          title: matter.title,
+          advocateAssigned: matter.leadAdvocate || '',
+        })),
+        entries,
+      );
+      setWatchdogResult(result);
+    } catch (error) {
+      setWatchdogError(error instanceof Error ? error.message : 'Could not check court cause lists.');
+    } finally {
       setIsScanningWatchdog(false);
-      showToast(`✓ Scanned 18 cause lists: Found ${res.matchedMattersCount} matters scheduled for court today!`);
-    }, 1200);
+    }
   };
 
   const copyText = (txt: string) => {
@@ -205,22 +279,22 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
           <div className="flex items-center gap-2 mb-1">
             <span className="w-2.5 h-2.5 rounded-full bg-purple-600 animate-pulse"></span>
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
-              P3L LEGAL AI ENGINE &middot; NYAGAH &amp; CO. ADVOCATES
+              Legal workflow tools
             </span>
           </div>
           <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2 font-brand">
             <Bot className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            Autonomous AI Legal Agents Studio
+            Legal drafting and review
           </h2>
           <p className="text-xs text-zinc-500 mt-0.5">
-            4 Specialized legal agents powering taxation drafting, opposition audits, WhatsApp dispatch, and cause list monitoring
+            Uses your saved matters and the documents you provide. Reviews need an advocate's approval.
           </p>
         </div>
 
         {/* Global Safety Badge */}
         <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 font-mono text-[11px] text-purple-700 dark:text-purple-300 flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-          <span>Safety Lock Active: Outbound messages route to verified firm test phone <strong>(+254 768 141 129)</strong></span>
+          <span>Messages go only to the configured internal test number, and require confirmation.</span>
         </div>
       </div>
 
@@ -231,7 +305,11 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
           <div className="flex items-center gap-2">
             <select
               value={selectedMatterId}
-              onChange={(e) => setSelectedMatterId(e.target.value)}
+              onChange={(e) => {
+                setSelectedMatterId(e.target.value);
+                setDrafterOutput(null);
+                setAuditorOutput(null);
+              }}
               className="p-2 text-xs font-semibold bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white"
             >
               {firmMatters.map(m => (
@@ -240,13 +318,15 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
                 </option>
               ))}
             </select>
+            {mattersLoadError && <p role="alert" className="mt-2 text-rose-600">{mattersLoadError}</p>}
+            {!mattersLoadError && firmMatters.length === 0 && <p className="mt-2 text-zinc-500">No open matters were found for this firm.</p>}
           </div>
         </div>
 
         <div className="text-right font-mono text-xs">
           <span className="text-zinc-400 block text-[10px] uppercase">Subject Matter Claim Value</span>
           <strong className="text-base font-bold text-emerald-600 dark:text-emerald-400">
-            KES {selectedMatter.claimValue.toLocaleString()}
+            KES {(selectedMatter?.amount || 0).toLocaleString()}
           </strong>
         </div>
       </div>
@@ -330,23 +410,38 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
                 Schedule 6 Taxation Drafter Agent
               </h3>
               <p className="text-zinc-500 text-xs">
-                Extracts trial bundles and applies Kenyan statutory scale rules (Schedule 6 Item 1(b) &amp; Item 2)
+                Builds a preliminary bill from the selected matter and the activities you enter. This tool does not read court files automatically.
               </p>
             </div>
 
             <button
               type="button"
               onClick={handleRunDrafter}
-              disabled={isDrafting}
+              disabled={isDrafting || !selectedMatter}
               className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-colors shadow-xs"
             >
               <Play className={`w-3.5 h-3.5 ${isDrafting ? 'animate-spin' : ''}`} />
-              <span>{isDrafting ? 'Drafting Statutory Bill...' : 'Run Taxation Drafter Agent'}</span>
+              <span>{isDrafting ? 'Preparing draft…' : 'Prepare draft bill'}</span>
             </button>
           </div>
 
+          <label className="block space-y-1.5">
+            <span className="font-semibold text-zinc-800 dark:text-zinc-200">Case activities and folios</span>
+            <span className="block text-zinc-500">Enter only work shown in the file. One activity per line: date | description | folios.</span>
+            <textarea
+              value={pleadingsText}
+              onChange={event => setPleadingsText(event.target.value)}
+              rows={5}
+              className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-3 text-xs"
+              placeholder="For example: 12.04.2026 | Drawing of the filed application | 8"
+            />
+          </label>
+
           {drafterOutput && (
             <div className="space-y-4">
+              <p className="rounded-lg bg-amber-50 p-3 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                Preliminary calculation only. Check the applicable scale, dates, disbursements, VAT, and every item before use.
+              </p>
               {/* Output Metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-mono">
                 <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200/60 dark:border-zinc-700">
@@ -409,41 +504,63 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
                 Opposition Auditor Agent
               </h3>
               <p className="text-zinc-500 text-xs">
-                Scans opponent's Bill of Costs to calculate statutory deductions and generate formal Written Grounds of Opposition
+                Checks the uploaded bill for exact repeated items. It does not assess statutory rates or make legal recommendations.
               </p>
             </div>
 
             <button
               type="button"
               onClick={handleRunAuditor}
-              disabled={isAuditing}
+              disabled={isAuditing || !selectedMatter || opponentItems.length === 0 || !opponentFirm.trim()}
               className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-colors shadow-xs"
             >
               <Play className={`w-3.5 h-3.5 ${isAuditing ? 'animate-spin' : ''}`} />
-              <span>{isAuditing ? 'Auditing Bill...' : 'Audit Opposing Bill of Costs'}</span>
+              <span>{isAuditing ? 'Reviewing bill…' : 'Review uploaded bill'}</span>
             </button>
           </div>
 
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="font-semibold text-zinc-800 dark:text-zinc-200">Opposing firm</span>
+              <input
+                value={opponentFirm}
+                onChange={event => setOpponentFirm(event.target.value)}
+                className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2.5"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="font-semibold text-zinc-800 dark:text-zinc-200">Upload the bill (Excel or CSV)</span>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={event => void handleLoadOpponentBill(event.target.files?.[0])}
+                className="block w-full text-xs"
+              />
+              <span className="block text-zinc-500">Include columns for particulars, amount, and category (INSTRUCTION, GETTING_UP, DRAWING, PERUSAL, ATTENDANCE, or DISBURSEMENT).</span>
+            </label>
+          </div>
+          {opponentItems.length > 0 && <p className="text-zinc-600 dark:text-zinc-300">{opponentItems.length} bill items loaded from your file.</p>}
+          {auditInputError && <p role="alert" className="text-rose-600 dark:text-rose-300">{auditInputError}</p>}
+
           {auditorOutput && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono">
+              <p className="rounded-lg bg-amber-50 p-3 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                This check only finds exact repeated line items. It does not decide whether a fee is excessive or legally recoverable.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
                 <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200/60 dark:border-zinc-700">
                   <span className="text-zinc-400 text-[10px] uppercase block">Total Opponent Claimed</span>
                   <strong className="text-base text-zinc-900 dark:text-white">KES {auditorOutput.totalOpponentClaimed.toLocaleString()}</strong>
                 </div>
                 <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
-                  <span className="text-rose-600 text-[10px] uppercase block font-bold">Total Recommended Tax Off</span>
-                  <strong className="text-base text-rose-600 dark:text-rose-400 font-extrabold">-KES {auditorOutput.totalRecommendedTaxOff.toLocaleString()}</strong>
-                </div>
-                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                  <span className="text-emerald-600 text-[10px] uppercase block font-bold">Projected Net Exposure</span>
-                  <strong className="text-base text-emerald-600 dark:text-emerald-400 font-extrabold">KES {auditorOutput.projectedNetExposure.toLocaleString()}</strong>
+                  <span className="text-rose-600 text-[10px] uppercase block font-bold">Exact repeated items to check</span>
+                  <strong className="text-base text-rose-600 dark:text-rose-400 font-extrabold">{auditorOutput.findings.length}</strong>
                 </div>
               </div>
 
-              {/* Detailed Findings */}
               <div className="space-y-2">
-                <span className="font-bold text-zinc-800 dark:text-zinc-200 block">Identified Statutory Objections:</span>
+                <span className="font-bold text-zinc-800 dark:text-zinc-200 block">Items to review:</span>
+                {auditorOutput.findings.length === 0 && <p className="text-zinc-600 dark:text-zinc-300">No exact repeated items found.</p>}
                 {auditorOutput.findings.map((f, i) => (
                   <div key={i} className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex items-start justify-between gap-3">
                     <div className="space-y-1">
@@ -453,34 +570,15 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
                         </span>
                         <strong className="text-zinc-900 dark:text-white">{f.particulars}</strong>
                       </div>
-                      <p className="text-zinc-600 dark:text-zinc-400 text-[11.5px]">{f.statutoryGround}</p>
-                      <span className="text-[10.5px] font-mono text-purple-600 dark:text-purple-400 block">Authority: {f.precedentRef}</span>
+                      <p className="text-zinc-600 dark:text-zinc-400 text-[11.5px]">{f.observation}</p>
                     </div>
 
                     <div className="text-right font-mono shrink-0">
-                      <span className="text-zinc-400 text-[10px] block">Tax Off:</span>
-                      <strong className="text-rose-600 dark:text-rose-400 text-sm">-KES {f.recommendedTaxOff.toLocaleString()}</strong>
+                      <span className="text-zinc-400 text-[10px] block">Amount:</span>
+                      <strong className="text-zinc-900 dark:text-zinc-100 text-sm">KES {f.claimedAmount.toLocaleString()}</strong>
                     </div>
                   </div>
                 ))}
-              </div>
-
-              {/* Generated Court Document Template */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-zinc-800 dark:text-zinc-200">Formal Grounds of Opposition Court Draft:</span>
-                  <button
-                    type="button"
-                    onClick={() => copyText(auditorOutput.formalSubmissionsTemplate)}
-                    className="px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 flex items-center gap-1 font-mono text-[10px]"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>Copy Court Submissions</span>
-                  </button>
-                </div>
-                <pre className="p-3.5 rounded-xl bg-zinc-950 text-zinc-300 font-mono text-[10.5px] overflow-x-auto max-h-60 leading-relaxed border border-zinc-800">
-                  {auditorOutput.formalSubmissionsTemplate}
-                </pre>
               </div>
             </div>
           )}
@@ -496,31 +594,22 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
             <div>
               <h3 className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
                 <Smartphone className="w-4 h-4 text-emerald-600" />
-                Dispatch &amp; Comms Agent (Live n8n &amp; WAHA WhatsApp Engine)
+                WhatsApp message
               </h3>
               <p className="text-zinc-500 text-xs">
-                Generates, stamps with QR verification, and dispatches PDFs &amp; WhatsApp/Email legal updates directly via n8n &amp; WAHA
+                Sends a message about the current preliminary draft to the configured internal test number.
               </p>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setRawN8nWorkflowPreview(!rawN8nWorkflowPreview)}
-                className="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-semibold text-xs flex items-center gap-1.5 cursor-pointer hover:bg-zinc-100 transition-colors"
-              >
-                <Terminal className="w-3.5 h-3.5 text-purple-600" />
-                <span>{rawN8nWorkflowPreview ? 'Hide n8n Flow' : 'View n8n JSON'}</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={handleRunDispatcher}
-                disabled={isDispatching}
+                disabled={isDispatching || !selectedMatter || drafterOutput?.matterId !== selectedMatter.id}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-colors shadow-xs"
               >
                 <Send className={`w-3.5 h-3.5 ${isDispatching ? 'animate-spin' : ''}`} />
-                <span>{isDispatching ? 'Dispatching Live Network HTTP...' : 'Send Live WhatsApp Dispatch'}</span>
+                <span>{isDispatching ? 'Sending…' : 'Send to test number'}</span>
               </button>
             </div>
           </div>
@@ -530,12 +619,12 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
             <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 space-y-1">
               <span className="font-bold flex items-center gap-1.5 text-xs">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                Mandatory Test Phone Lock:
+                Internal test number:
               </span>
               <p className="text-[11.5px] leading-relaxed">
-                External clients protected. Outbound dispatches strictly send to internal developer test line:
+                Messages from this screen go only to:
                 <strong className="block text-emerald-900 dark:text-emerald-200 font-mono text-xs mt-0.5">
-                  {NYAGAH_AI_CONFIG.testPhoneNumber} (Pochi la Biashara line / Razak)
+                  {NYAGAH_AI_CONFIG.testPhoneNumber}
                 </strong>
               </p>
             </div>
@@ -543,10 +632,10 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
             <div className="p-3.5 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-500/20 text-purple-800 dark:text-purple-300 space-y-1">
               <span className="font-bold flex items-center gap-1.5 text-xs">
                 <Zap className="w-4 h-4 text-purple-600 shrink-0" />
-                Live Network Gateway Status:
+                Gateway:
               </span>
               <p className="text-[11.5px] leading-relaxed">
-                Connects directly to WAHA WhatsApp API or n8n Webhook trigger. Interrogates HTTP response and latency live.
+                An HTTP response means the gateway accepted a request; it does not confirm delivery to WhatsApp.
               </p>
             </div>
           </div>
@@ -619,48 +708,17 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
             </div>
           </div>
 
-          {/* Raw n8n Workflow Code Preview */}
-          {rawN8nWorkflowPreview && (
-            <div className="space-y-2 p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-300 font-mono text-[10.5px]">
-              <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-                <span className="font-bold text-purple-400">
-                  Live n8n Multi-Tenant WhatsApp Gateway Router Workflow (CsBJMQmxtWDWqpyq)
-                </span>
-                <span className="text-[9px] text-zinc-500">From n8n MCP &amp; local Razak Agents repository</span>
-              </div>
-              <p className="text-zinc-400 text-[10px]">
-                Nodes: Webhook Trigger &rarr; Universal Normalizer &rarr; Supabase Tenant Fetch &rarr; Gemini/OpenAI LangChain Brain &rarr; WAHA Outbound &rarr; Instant Telegram &amp; Email Escalation Desk
-              </p>
-              <pre className="overflow-x-auto max-h-56 leading-relaxed text-zinc-400 p-2 bg-zinc-900 rounded">
-{`{
-  "name": "Razak Odin - Multi-Tenant WhatsApp Gateway Router",
-  "active": true,
-  "nodes": [
-    "WhatsApp Universal Gateway Webhook (/webhook/whatsapp-odin-inbound)",
-    "Universal Normalizer & Dedupe (Locks to 254768141129)",
-    "Fetch Tenant from Supabase (tenant_whatsapp_lines)",
-    "Odin Multilingual Sales Brain (@n8n/n8n-nodes-langchain.agent)",
-    "Universal Outbound Dispatcher (WAHA / Telegram / Email)",
-    "WAHA Send Outbound Message (Cloudflare tunnel)"
-  ],
-  "phoneLock": "+254 768 141 129"
-}`}
-              </pre>
-            </div>
-          )}
-
-          {/* Real Network Delivery Receipt & Diagnostic Card */}
           {dispatchReceipt && (
             <div className="space-y-4">
               <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4" />
-                    Delivery Receipt ({dispatchReceipt.dispatchId})
+                    Gateway request ({dispatchReceipt.dispatchId})
                   </span>
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded font-mono text-[9px] font-bold ${
-                      dispatchReceipt.status === 'SENT_LIVE_HTTP_SUCCESS' 
+                      dispatchReceipt.status === 'ACCEPTED_BY_GATEWAY'
                         ? 'bg-emerald-500/20 text-emerald-600'
                         : 'bg-amber-500/20 text-amber-600'
                     }`}>
@@ -675,7 +733,7 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
                 </div>
 
                 <div className="text-zinc-600 dark:text-zinc-400 font-mono text-[11px] space-y-1">
-                  <p>Recipient: <strong className="text-zinc-900 dark:text-white">{dispatchReceipt.recipient}</strong> (Verified Pochi la Biashara line)</p>
+                  <p>Recipient: <strong className="text-zinc-900 dark:text-white">{dispatchReceipt.recipient}</strong></p>
                   <p>Gateway Endpoint: <strong className="text-zinc-900 dark:text-white">{dispatchReceipt.networkDetails?.endpointAttempted}</strong></p>
                   <p>Network Roundtrip: <strong className="text-zinc-900 dark:text-white">{dispatchReceipt.networkDetails?.durationMs}ms</strong></p>
                   {dispatchReceipt.networkDetails?.error && (
@@ -692,7 +750,7 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
               {/* Message Preview */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-zinc-800 dark:text-zinc-200">Delivered WhatsApp Payload:</span>
+                  <span className="font-bold text-zinc-800 dark:text-zinc-200">Message preview:</span>
                   <button
                     type="button"
                     onClick={() => copyText(dispatchReceipt.messageBody)}
@@ -723,7 +781,7 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
                 Judiciary Cause List Watchdog Agent
               </h3>
               <p className="text-zinc-500 text-xs">
-                Scrapes daily Milimani Commercial, Civil, Court of Appeal &amp; ELC cause lists to sync courtrooms and virtual Teams links
+                Checks published cause lists only when a verified court-list service is connected.
               </p>
             </div>
 
@@ -738,12 +796,18 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
             </button>
           </div>
 
+          {watchdogError && (
+            <p role="alert" className="rounded-lg bg-amber-50 p-3 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              {watchdogError}
+            </p>
+          )}
+
           {watchdogResult && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 font-mono">
                 <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200/60 dark:border-zinc-700">
                   <span className="text-zinc-400 text-[10px] uppercase block">Lists Scanned Today</span>
-                  <strong className="text-base text-zinc-900 dark:text-white">{watchdogResult.totalListsScanned} Courtrooms</strong>
+                  <strong className="text-base text-zinc-900 dark:text-white">{watchdogResult.totalEntriesScanned} Entries</strong>
                 </div>
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
                   <span className="text-amber-600 text-[10px] uppercase block font-bold">Matters Listed Today</span>
@@ -751,7 +815,7 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
                 </div>
                 <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                   <span className="text-emerald-600 text-[10px] uppercase block font-bold">Diary Status</span>
-                  <strong className="text-base text-emerald-600 dark:text-emerald-400 font-extrabold">Synchronized</strong>
+                  <strong className="text-base text-emerald-600 dark:text-emerald-400 font-extrabold">Feed checked</strong>
                 </div>
               </div>
 
@@ -786,7 +850,7 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
 
               {/* Generated Morning Briefing for Counsel */}
               <div className="space-y-1.5">
-                <span className="font-bold text-zinc-800 dark:text-zinc-200">Morning WhatsApp Briefing Generated for Counsel:</span>
+                <span className="font-bold text-zinc-800 dark:text-zinc-200">Cause-list results:</span>
                 <pre className="p-3.5 rounded-xl bg-zinc-950 text-zinc-300 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap leading-relaxed border border-zinc-800">
                   {watchdogResult.briefingText}
                 </pre>
@@ -798,4 +862,3 @@ export const AdminAiLegalAgentsView: React.FC<AdminAiLegalAgentsViewProps> = ({ 
     </div>
   );
 };
-

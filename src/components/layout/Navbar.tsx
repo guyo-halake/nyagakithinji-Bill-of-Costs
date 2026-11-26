@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Menu, X, Bell, Sun, Moon, User, CheckCircle2, LogOut, Search, Settings } from 'lucide-react';
 import { EXACT_FIRM_INFO, SystemUser } from '../../services/supabase';
 
+export interface NavbarSearchResult {
+  id: string;
+  type: 'Client' | 'Matter' | 'Fee note';
+  title: string;
+  detail: string;
+  searchableText: string;
+  tab: string;
+}
+
 interface NavbarProps {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
@@ -12,6 +21,9 @@ interface NavbarProps {
   currentUser?: SystemUser | null;
   searchQuery?: string;
   setSearchQuery?: (query: string) => void;
+  searchResults?: NavbarSearchResult[];
+  searchError?: string;
+  onSelectSearchResult?: (result: NavbarSearchResult) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -24,16 +36,21 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   searchQuery = '',
   setSearchQuery,
+  searchResults = [],
+  searchError = '',
+  onSelectSearchResult,
 }) => {
   const [showNotifModal, setShowNotifModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   
   const [firmSettings, setFirmSettings] = useState(() => {
     const saved = localStorage.getItem('BILLSZIP_FIRM_SETTINGS');
     if (saved) {
       try { return JSON.parse(saved); } catch(e) {}
     }
-    return { topbarTitle: 'Kithinji & Co', topbarSubtitle: 'Advocates of the High Court of Kenya', logoUrl: '/logo.png' };
+    return { topbarTitle: EXACT_FIRM_INFO.name, topbarSubtitle: 'Advocates of the High Court of Kenya', logoUrl: '/logo.png' };
   });
 
   useEffect(() => {
@@ -122,6 +139,48 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const searchTerms = searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filteredSearchResults = searchTerms.length
+    ? searchResults
+        .filter(result => {
+          const text = `${result.searchableText} ${result.title} ${result.detail}`.toLowerCase();
+          return searchTerms.every(term => text.includes(term));
+        })
+        .slice(0, 10)
+    : [];
+  const selectSearchResult = (result: NavbarSearchResult) => {
+    onSelectSearchResult?.(result);
+    setShowSearchResults(false);
+    setIsMobileSearchOpen(false);
+  };
+  const searchResultsPanel = (
+    <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-xl">
+      {filteredSearchResults.length ? (
+        <>
+        {searchError && <p role="alert" className="px-3 py-2 text-[10px] text-amber-700 dark:text-amber-400">{searchError}</p>}
+        {filteredSearchResults.map(result => (
+          <button
+            type="button"
+            key={`${result.type}-${result.id}`}
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => selectSearchResult(result)}
+            className="block w-full border-b border-[var(--border-color)]/60 px-3 py-2.5 text-left last:border-0 hover:bg-slate-50 dark:hover:bg-zinc-800"
+          >
+            <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">{result.type}</span>
+            <span className="block truncate text-xs font-semibold text-slate-900 dark:text-white">{result.title}</span>
+            <span className="block truncate text-[11px] text-slate-500 dark:text-zinc-400">{result.detail}</span>
+          </button>
+        ))}
+        </>
+      ) : searchError ? (
+        <p role="alert" className="px-3 py-2 text-xs text-rose-600 dark:text-rose-400">{searchError}</p>
+      ) : (
+        <p className="px-3 py-2.5 text-xs text-slate-500 dark:text-zinc-400">
+          {searchQuery.trim() ? 'No matching firm records.' : 'Start typing to search firm records.'}
+        </p>
+      )}
+    </div>
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -135,29 +194,36 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, []);
 
   return (
-    <header className="h-14 bg-[var(--bg-main)] px-4 sm:px-6 flex items-center justify-between sticky top-0 z-40 transition-colors duration-200 border-b border-[var(--border-color)]/40">
+    <header className="h-20 shrink-0 bg-[var(--bg-main)] px-3 sm:px-6 flex items-center justify-between sticky top-0 z-40 transition-colors duration-200 border-b border-[var(--border-color)] shadow-sm">
       
-      {/* Left Area: Hamburger Toggle + Mobile-only Logo */}
-      <div className="flex items-center gap-3 shrink-0 relative z-10">
+      {/* Firm identity stays in the header, independent of sidebar visibility */}
+      <div className="flex items-center gap-3 sm:gap-4 shrink-0 relative z-10">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="p-1.5 rounded-lg text-slate-700 dark:text-zinc-300 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors focus:outline-none cursor-pointer shrink-0"
+          className="p-2 rounded-lg text-slate-700 dark:text-zinc-300 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors focus:outline-none cursor-pointer shrink-0"
           title="Toggle Navigation Menu"
         >
           {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
 
-        {/* Firm Logo: Shown on mobile/tablet when sidebar is hidden */}
-        <div className="flex items-center gap-2 shrink-0 py-0.5 lg:hidden">
+        <div className="flex items-center gap-3 min-w-0 py-1">
           <img
             src={firmSettings.logoUrl || '/logo.png'}
-            alt=""
+            alt="Law Firm Crest"
             onError={(e) => {
               e.currentTarget.onerror = null;
               e.currentTarget.src = '/logo.png';
             }}
-            className="h-8 max-h-8 max-w-[160px] w-auto object-contain shrink-0"
+            className="h-14 max-h-14 max-w-[88px] sm:max-w-[120px] w-auto object-contain shrink-0 drop-shadow-sm"
           />
+          <div className="min-w-0 hidden sm:block">
+            <p className="truncate text-sm font-semibold text-[var(--text-main)]">
+              {firmSettings.topbarTitle || EXACT_FIRM_INFO.name}
+            </p>
+            <p className="truncate text-[11px] text-[var(--text-muted)] mt-0.5">
+              {firmSettings.topbarSubtitle || 'Advocates of the High Court of Kenya'}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -169,13 +235,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             ref={searchInputRef}
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery && setSearchQuery(e.target.value)}
+            onFocus={() => setShowSearchResults(true)}
+            onChange={(e) => setSearchQuery?.(e.target.value)}
             placeholder="Search anything... matters, clients, fee notes"
             className="bg-transparent text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none w-full font-sans"
           />
           {searchQuery ? (
             <button
-              onClick={() => setSearchQuery && setSearchQuery('')}
+              onClick={() => {
+                setSearchQuery?.('');
+                setShowSearchResults(false);
+              }}
               className="text-slate-400 hover:text-slate-600 text-xs font-bold"
             >
               <X className="w-3.5 h-3.5" />
@@ -186,12 +256,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             </kbd>
           )}
         </div>
+        {showSearchResults && searchResultsPanel}
       </div>
 
       {/* Right Controls: Theme Switcher, Notifications Bell, Profile Avatar */}
       <div className="flex items-center gap-3 relative shrink-0 z-10">
         {/* Mobile Search Icon (Shows on small screens) */}
-        <button className="sm:hidden p-2 rounded-xl text-slate-700 dark:text-zinc-300 hover:text-blue-500 transition-colors">
+        <button
+          type="button"
+          onClick={() => setIsMobileSearchOpen(value => !value)}
+          className="sm:hidden p-2 rounded-xl text-slate-700 dark:text-zinc-300 hover:text-blue-500 transition-colors"
+          aria-label="Search firm records"
+        >
           <Search className="w-5 h-5" />
         </button>
 
@@ -229,6 +305,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {realNotifications.length > 0 ? `${realNotifications.length} Recent` : '0 New'}
                 </span>
               </div>
+              {isMobileSearchOpen && (
+                <div className="absolute left-0 right-0 top-full z-50 bg-[var(--bg-main)] px-4 pb-3 sm:hidden">
+                  <div className="relative flex items-center gap-2 rounded-xl border border-[var(--border-color)] bg-slate-100 px-3 py-2 dark:bg-zinc-800">
+                    <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                    <input
+                      autoFocus
+                      type="search"
+                      value={searchQuery}
+                      onFocus={() => setShowSearchResults(true)}
+                      onChange={event => setSearchQuery?.(event.target.value)}
+                      placeholder="Search clients, matters, fee notes"
+                      className="w-full bg-transparent text-xs text-slate-900 outline-none dark:text-white"
+                    />
+                    <button type="button" onClick={() => setIsMobileSearchOpen(false)} aria-label="Close search">
+                      <X className="h-4 w-4 text-slate-500" />
+                    </button>
+                    {showSearchResults && searchResultsPanel}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2 max-h-72 overflow-y-auto">
                 {realNotifications.length === 0 ? (
