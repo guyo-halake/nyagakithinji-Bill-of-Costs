@@ -24,6 +24,7 @@ import { getLocalTemplates, assignRoleToUser, RoleTemplate } from '../../service
 import { getActivityLogs, logSystemActivity, ActivityLogItem } from '../../services/activityLogger';
 import { fetchFirmUsers, createFirmUser, createFirmLogin, updateFirmUser, deleteFirmUser, fetchClients, fetchMatters } from '../../services/data';
 import { AdminServerView } from './AdminServerView';
+import { ServerStorageConsole } from './ServerStorageConsole';
 import { AdminAiInfraView } from './AdminAiInfraView';
 import { AdminFinanceView } from './AdminFinanceView';
 import { AdminClientCrmView } from './AdminClientCrmView';
@@ -398,9 +399,9 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
     } else if (cmd === 'docker ps') {
       out = 'CONTAINER ID   IMAGE                 STATUS         PORTS\na71b9c201e9a   karani-erp-web:v1.3   Up 5 hours     0.0.0.0:3000->3000/tcp\n8e1094ba12c0   sayara-daemon:v2.8    Up 3 days      0.0.0.0:8040->8040/tcp\n4f2910cd9102   redis:7-alpine        Up 14 days     0.0.0.0:6379->6379/tcp\n2a9108dc119a   postgres:15-alpine    Up 14 days     0.0.0.0:5432->5432/tcp';
     } else if (cmd === 'df -h') {
-      out = 'Filesystem                              Size  Used Avail Use% Mounted on\n/dev/sda1 (Ubuntu OS root)               480G   42G  414G  10% /\n/dev/sdb1 (/mnt/razak_storage/projects)  12T   4.8T  7.2T  40% /mnt/razak_storage\n/dev/sdc1 (/mnt/ai_vault_cache)          45T    12T   33T  27% /mnt/ai_vault_cache';
+      out = 'Filesystem                              Size  Used Avail Use% Mounted on\n/dev/sda1 (Ubuntu OS root)               480G   42G  414G  10% /\n/dev/sdb1 (/mnt/razak_storage)            12T  9.34T  2.66T  78% /mnt/razak_storage\nOracle VPS allocation (/mnt/ai_vault)     10T   10T     0T 100% /mnt/ai_vault';
     } else if (cmd === 'uptime') {
-      out = '15:20:00 up 1048 days, 4:18, 1 user, load average: 0.18, 0.24, 0.20\nMarsabit Node: Adrian AK 3674 Fiber 42 Mbps';
+      out = '15:20:00 up 18 days, 7:42, 1 user, load average: 0.42, 0.55, 0.49\nMarsabit Node: Adrian AK 3674 Fiber 78 Mbps';
     } else if (cmd === 'policy all') {
       handleSetFeeNotesScope('all');
       out = 'Fee notes policy updated -> ALLOW ALL FEE NOTES (Entire firm ledger visible)';
@@ -568,7 +569,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       ],
       journey: [
         { phase: 'Jan 2026 (v0.1 – v1.0 Web POS)', date: 'Jan 2026', details: 'Started as a standard web POS running on Chrome. Crashed on Day 3 because Marsabit power fluctuated and internet dropped, causing web checkout to freeze with customers queued up.' },
-        { phase: 'Feb 2026 Architectural Shift (Offline Electron)', date: 'Feb 2026', details: 'Migrated to an offline-first Electron + React + SQLite desktop application. SQLite local WAL (Write-Ahead Logging) database writes transactions locally in <4ms. When Adrian AK fiber is up, transactions background-sync to razak-server partition /mnt/razak_storage/projects/freshcity (320 GB allocated).' },
+        { phase: 'Feb 2026 Architectural Shift (Offline Electron)', date: 'Feb 2026', details: 'Migrated to an offline-first Electron + React + SQLite desktop application. SQLite local WAL (Write-Ahead Logging) database writes transactions locally in <4ms. When Adrian AK fiber is up, transactions background-sync to razak-server partition /mnt/razak_storage/projects/freshcity (8 GB allocated).' },
         { phase: 'May 2026 (Honeywell Scanner & Z-Report)', date: 'May 2026', details: 'Integrated Honeywell Orbit 7120 omnidirectional laser scanner via raw serial-over-USB emulation. Built automated daily sales reconciliation with End-of-Day (Z-Report) thermal printout.' },
         { phase: 'Aug 2026 (Multi-tier Cashier Locks)', date: 'Aug 2026', details: 'Added multi-tier cashier permission locks: cashier cannot void an item without Manager 4-digit PIN override with bcrypt hash.' }
       ],
@@ -744,7 +745,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       progress: 90,
       health: 'green',
       techStack: ['React', 'Node.js Express', 'PostgreSQL', 'Cloudinary CDN', 'WhatsApp API'],
-      tasks: ['Vehicle spec sheet comparisons', 'Mileage verification badges', 'WhatsApp showroom lead generator', '420 GB raw photo storage'],
+      tasks: ['Vehicle spec sheet comparisons', 'Mileage verification badges', 'WhatsApp showroom lead generator', '65 GB optimized listing photos'],
       allocatedStorageGb: 65,
       isPaying: true,
       currentVersion: 'v2.4-gallery',
@@ -763,7 +764,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
         { hash: 'a119024', message: 'init: PostgreSQL schema for vehicle inventory (year, mileage, transmission, fuel)', date: '10 Aug 2025', branch: 'master' }
       ],
       journey: [
-        { phase: 'Aug 2025 (Initial Platform Launch)', date: 'Aug 2025', details: 'Built React + Node.js marketplace for luxury SUVs (Prado TX, Land Cruiser V8, Subaru Outback, Hilux). 420 GB allocated on razak-server for uncompressed vehicle inspection photos.' },
+        { phase: 'Aug 2025 (Initial Platform Launch)', date: 'Aug 2025', details: 'Built React + Node.js marketplace for luxury SUVs (Prado TX, Land Cruiser V8, Subaru Outback, Hilux). About 65 GB is allocated on razak-server for optimized listing photos and vehicle records.' },
         { phase: 'Aug 2026 (Performance Overhaul)', date: 'Aug 2026', details: 'Implemented Cloudinary CDN auto-compression with WebP delivery, reducing gallery payload from 14MB to 1.8MB per car.' }
       ],
       financialLedger: {
@@ -803,7 +804,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       progress: 88,
       health: 'green',
       techStack: ['Next.js 14', 'Tailwind CSS', 'Supabase', 'Cloudinary CDN'],
-      tasks: ['Panoramic 360° suite photo gallery', 'Interactive conference room quotation engine', 'Dining menu showcase', '140 GB drone footage storage'],
+      tasks: ['Panoramic 360° suite photo gallery', 'Interactive conference room quotation engine', 'Dining menu showcase', 'Optimized photo and short-form video library'],
       allocatedStorageGb: 35,
       isPaying: false,
       currentVersion: 'v1.4-quotes',
@@ -820,7 +821,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
         { hash: 'a001923', message: 'fix: responsive image grid layout on mobile landscape view', date: '12 Jul 2026', branch: 'ui/resort-gallery' }
       ],
       journey: [
-        { phase: 'March 2026 (Genesis)', date: 'Mar 2026', details: 'Built as a flagship P3L engineering showcase demonstrating high-end hospitality UI/UX to win future commercial hotel contracts. 140 GB allocated on razak-server for 4K drone photography.' }
+        { phase: 'March 2026 (Genesis)', date: 'Mar 2026', details: 'Built as a flagship P3L engineering showcase demonstrating high-end hospitality UI/UX to win future commercial hotel contracts. About 35 GB is allocated on razak-server for optimized photography and demo content.' }
       ],
       financialLedger: {
         summary: 'Strategic non-paying portfolio asset demonstrating premium hospitality UX to pitch upcoming Mount Kenya hotel developments.',
@@ -1022,7 +1023,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       progress: 94,
       health: 'amber',
       techStack: ['Python 3.11', 'Ollama (8B LoRA)', 'Mixtral 70B MoE', 'pgvector (bge-large-en)', 'Whisper Large-v3', 'Surya OCR', 'WireGuard'],
-      tasks: ['8B LoRA for zero-latency local operations', 'Oracle Cloud VPS 45 TB NVMe holding 1.84M Kenya Law vector chunks', 'Bilingual English/Swahili legal terminology', 'WireGuard mesh at 42ms ping'],
+      tasks: ['8B LoRA for zero-latency local operations', 'Oracle Cloud VPS 10 TB allocation for AI data and checkpoints', 'Bilingual English/Swahili legal terminology', 'WireGuard mesh at 42ms ping'],
       allocatedStorageGb: 65,
       isPaying: false,
       currentVersion: 'v3.2-hybrid',
@@ -1043,10 +1044,10 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       journey: [
         { phase: '2023 (Genesis & Datasets)', date: '2023', details: 'Began with Claude 2 prompt synthesis chains and OpenAI GPT-3 fine-tuning runs. Built scrapers to collect 20+ years of Kenya Law Gazette notices, High Court precedents, and Civil Procedure statutes from eKLR.' },
         { phase: '2024 (Bare-Metal Local LoRA)', date: '2024', details: 'Moved away from proprietary API dependence. Fine-tuned Llama-2-7b and Mistral 7B locally in Marsabit using QLoRA. Trained on bilingual English and Swahili legal terminology (e.g., kufilisika, hati ya kiapo, dhamana, gharama za kesi).' },
-        { phase: '2025–2026 (Sovereign Hybrid Architecture)', date: '2025–2026', details: 'Local Node (razak-server) runs Ollama with quantised 8B LoRA for zero-latency local operations. Cloud Node (Oracle Cloud VPS 45 TB) holds 1,842,910 Kenya Law vector chunks (bge-large-en), Mixtral 70B MoE weights, Whisper Large-v3, and Surya OCR, connected via WireGuard tunnel at 42ms ping.' }
+        { phase: '2025–2026 (Sovereign Hybrid Architecture)', date: '2025–2026', details: 'Local Node (razak-server) runs Ollama with quantised 8B LoRA for zero-latency local operations. Cloud Node (Oracle Cloud VPS, 10 TB fully allocated) holds Kenya Law vector chunks (bge-large-en), Mixtral 70B MoE weights, Whisper Large-v3, and Surya OCR, connected via WireGuard tunnel at 42ms ping.' }
       ],
       financialLedger: {
-        summary: 'Oracle Cloud VPS 45 TB NVMe storage tier billed at flat monthly rates. Zero token subscription costs (100% self-hosted inference).',
+        summary: 'Oracle Cloud VPS 10 TB storage allocation for AI services. Zero token subscription costs (100% self-hosted inference).',
         totalSettled: 'Sovereign Infrastructure',
         items: []
       },
@@ -1279,8 +1280,8 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       progress: 98,
       health: 'green',
       techStack: ['Jellyfin Media Server', 'Docker', 'Intel QuickSync VA-API', 'Nginx', 'Samba'],
-      tasks: ['4.2 TB uncompressed media library', 'Hardware HEVC 1080p transcoding', 'Local LAN streaming without internet bandwidth', 'DLNA smart TV casting'],
-      allocatedStorageGb: 3200,
+      tasks: ['About 600 GB media library', 'Hardware HEVC 1080p transcoding', 'Local LAN streaming without internet bandwidth', 'DLNA smart TV casting'],
+      allocatedStorageGb: 600,
       isPaying: false,
       currentVersion: 'v10.9-quicksync',
       changelog: [
@@ -1293,7 +1294,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
         { hash: 'e881029', message: 'infra: pass /dev/dri renderD128 node into Docker container for hardware HEVC decode', date: '10 Oct 2026', branch: 'master' }
       ],
       journey: [
-        { phase: '2025 (Local LAN Entertainment)', date: '2025', details: 'Offline multimedia server hosted on razak-server in Marsabit. Stores 4.2 TB of uncompressed movies, tutorials, and music accessible locally across family laptops and smart TVs without consuming internet bandwidth.' }
+        { phase: '2025 (Local LAN Entertainment)', date: '2025', details: 'Offline multimedia server hosted on razak-server in Marsabit. Stores about 600 GB of movies, tutorials, and music accessible locally across family laptops and smart TVs without consuming internet bandwidth.' }
       ],
       financialLedger: {
         summary: 'Personal home utility. Hardware storage self-funded.',
@@ -1411,7 +1412,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       lead: 'Guyo Halake',
       category: 'Internal Hardware',
       projectGroup: 'hardware',
-      status: 'Online · 1,048 Days Uptime',
+      status: 'Online · 18d uptime',
       contractType: 'Personal Hardware (No Contract)',
       monthlyFee: 'KES 8,500/mo (Fiber & Battery)',
       initialPaid: 'Self-Built',
@@ -1483,7 +1484,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       health: 'green',
       techStack: ['Arch Linux (Kernel 6.11)', 'AMD Ryzen 7 5700X', '32GB DDR4', '2TB Samsung 980 Pro', 'WireGuard wg0', 'Docker'],
       tasks: ['Primary compilation and development node', 'Fast Docker image building', 'Vite & FastAPI local staging', 'Direct USB peripheral testing for thermal printers & laser scanners'],
-      allocatedStorageGb: 2000,
+      allocatedStorageGb: 256,
       isPaying: false,
       currentVersion: 'v6.11-arch',
       changelog: [
@@ -1537,7 +1538,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
       health: 'blue',
       techStack: ['AMD Ryzen 9 9950X', '64GB DDR5-6000', 'Nvidia RTX 4080 Super 16GB', 'Dual 2TB NVMe RAID 0', 'Custom 360mm AIO Liquid Loop'],
       tasks: ['Dedicated local LLM 70B 4-bit quantized inference', 'PyTorch legal embeddings generator', 'Blender 3D & Unreal Engine simulation', 'Ultra-fast C++ and Rust compilation'],
-      allocatedStorageGb: 4000,
+      allocatedStorageGb: 0,
       isPaying: false,
       currentVersion: 'v0.1-parts-spec',
       changelog: [
@@ -2049,13 +2050,13 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
             <button
               onClick={() => {
                 setActiveTab('server');
-                showToast('Opened Server Settings');
+                showToast('Opened Razak Server details.');
               }}
-              className="px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-mono font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-              title="Open Server Settings"
+              className="px-3 py-1.5 rounded-lg border border-sky-200 bg-sky-50 text-xs font-semibold text-sky-800 hover:border-sky-300 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/60 flex items-center gap-1.5 cursor-pointer transition-colors"
+              title="Open Razak Server details"
             >
-              <Server className="w-3.5 h-3.5 text-blue-500" />
-              <span>Open Server</span>
+              <Server className="w-3.5 h-3.5" />
+              <span>Open Host Server</span>
             </button>
 
             {/* Karani Law button */}
@@ -2070,10 +2071,10 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
 
             <div className="flex items-center gap-2 pl-2.5 border-l border-zinc-200 dark:border-zinc-800">
               <div className="w-7 h-7 rounded-full bg-amber-500 text-zinc-950 font-bold text-xs flex items-center justify-center font-mono">
-                GH
+                {(currentUser.username || currentUser.fullName || 'U').slice(0, 2).toUpperCase()}
               </div>
               <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200 hidden xl:inline">
-                Guyoh Halake
+                {currentUser.username || currentUser.fullName}
               </span>
             </div>
           </div>
@@ -2116,7 +2117,9 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                     </div>
                     <h1 className="text-3xl sm:text-4xl tracking-tight text-zinc-900 dark:text-white leading-tight">
                       <span className="font-brand font-bold">{getGreeting()}, </span>
-                      <span className="font-brand italic font-semibold text-amber-500 dark:text-amber-400">Razak</span>
+                      <span className="font-brand italic font-semibold text-amber-500 dark:text-amber-400">
+                        {currentUser.username || currentUser.fullName}
+                      </span>
                     </h1>
                     <p className="text-xs text-zinc-500 font-mono mt-1">
                       {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} &middot; Station Active &middot; Marsabit Node
@@ -2208,11 +2211,41 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                         <span className="text-zinc-400 font-sans">Physical Storage:</span>
                         <strong className="text-zinc-800 dark:text-zinc-200">12 TB NAS (3 TB Free)</strong>
                       </div>
-                      <div className="flex justify-between items-center py-1">
+                      {/* <div className="flex justify-between items-center py-1">
                         <span className="text-zinc-400 font-sans">Oracle Cloud VPS:</span>
                         <strong className="text-zinc-800 dark:text-zinc-200">10 TB AI Storage</strong>
+                      </div> */}
+                      <div className="flex justify-between items-center py-1">
+                        <span className="text-zinc-400 font-sans">Oracle Cloud VPS:</span>
+                        <strong className="text-zinc-800 dark:text-zinc-200">Unconfigured</strong>
                       </div>
                     </div>
+
+                    <a
+                      href="https://www.google.com/maps/search/?api=1&query=2.331803%2C38.0307718"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-start gap-2 border-t border-zinc-100 pt-3 font-sans text-[11px] text-sky-700 hover:text-sky-900 dark:border-zinc-800 dark:text-sky-300 dark:hover:text-sky-200"
+                    >
+                      <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>2.331803, 38.0307718 · JJ+P79, Sagante</span>
+                      <ArrowUpRight className="ml-auto mt-0.5 h-3 w-3 shrink-0" />
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('server');
+                        showToast('Opened Razak Server details.');
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg bg-sky-600 px-3.5 py-2.5 font-sans text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Server className="h-4 w-4" />
+                        Open Host Server · 192.164.1.56
+                      </span>
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                    </button>
                   </div>
 
                   {/* Card 2: Today (Dynamic Real-Time Date & Coursework Schedule) */}
@@ -2493,75 +2526,37 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                 {/* Live Safaricom Daraja 2.0 Webhook Stream Card */}
                 {/* <DarajaListenerCard showToast={showToast} /> */}
 
-                <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8 space-y-7">
-                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 pb-5">
-                    <div>
-                      <p className="text-xs text-zinc-500">Bare metal server · Marsabit</p>
-                      <h2 className="mt-1 text-xl sm:text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">
-                        Server storage
-                      </h2>
-                    </div>
-                    <p className="text-sm text-zinc-500">Total capacity across both storage locations</p>
-                  </div>
+                <div className="space-y-4">
+                  <ServerStorageConsole
+                    uptimeSeconds={uptimeSeconds}
+                    formatUptime={formatUptime}
+                    internetSpeed={internetSpeed}
+                  />
 
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                    <div className="space-y-5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <HardDrive className="w-5 h-5 text-orange-600" />
-                          <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Physical storage</h3>
+                  <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Cloud className="h-4 w-4 text-zinc-500" />
+                        <div>
+                          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Oracle Cloud VPS</h3>
+                          <p className="mt-0.5 text-xs text-zinc-500">Separate cloud allocation · 2 TB + 8 TB</p>
                         </div>
-                        <span className="text-lg font-semibold text-zinc-950 dark:text-white">12 TB</span>
                       </div>
-                      <div className="h-3 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800 flex" aria-label="Physical storage allocation">
-                        <div className="h-full bg-orange-700" style={{ width: '25%' }} title="Folders and contents: 3 TB" />
-                        <div className="h-full bg-orange-600" style={{ width: '5%' }} title="Media and movies: 600 GB" />
-                        <div className="h-full bg-orange-500" style={{ width: '16.67%' }} title="Games and software: 2 TB" />
-                        <div className="h-full bg-orange-400" style={{ width: '49.16%' }} title="Software and agents: 5.9 TB" />
-                        <div className="h-full bg-zinc-300 dark:bg-zinc-600" style={{ width: '4.17%' }} title="Free: 500 GB" />
-                      </div>
-                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {[
-                          { label: 'Folders and contents', amount: '3 TB' },
-                          { label: 'Media and movies', amount: '600 GB' },
-                          { label: 'Games and software', amount: '2 TB' },
-                          { label: 'Software and agents', amount: '5.9 TB' },
-                          { label: 'Free', amount: '500 GB' }
-                        ].map(item => (
-                          <div key={item.label} className="flex items-center justify-between py-2.5 text-sm">
-                            <span className="text-zinc-600 dark:text-zinc-400">{item.label}</span>
-                            <span className="font-medium text-zinc-900 dark:text-zinc-100">{item.amount}</span>
-                          </div>
-                        ))}
+                      <p className="font-mono text-sm font-semibold text-zinc-900 dark:text-white">10 TB allocated</p>
+                    </div>
+                    <div className="mt-4 h-1.5 overflow-hidden rounded-sm bg-zinc-100 dark:bg-zinc-800" role="img" aria-label="10 terabytes allocated across two cloud services">
+                      <div className="flex h-full w-full">
+                        <div className="h-full bg-sky-600" style={{ width: '20%' }} title="Najma's Agent 6864: 2 TB" />
+                        <div className="h-full bg-indigo-500" style={{ width: '80%' }} title="Matta Gant / Odin 8 TB" />
                       </div>
                     </div>
-
-                    <div className="space-y-5 xl:border-l xl:border-zinc-100 xl:dark:border-zinc-800 xl:pl-8">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Cloud className="w-5 h-5 text-orange-600" />
-                          <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Oracle Cloud VPS</h3>
-                        </div>
-                        <span className="text-lg font-semibold text-zinc-950 dark:text-white">10 TB · Full</span>
-                      </div>
-                      <div className="h-3 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800 flex" aria-label="Oracle cloud storage fully allocated">
-                        <div className="h-full bg-orange-700" style={{ width: '20%' }} title="Najma's Agent 6864: 2 TB" />
-                        <div className="h-full bg-orange-500" style={{ width: '80%' }} title="Matta Gant / Odin: 8 TB" />
-                      </div>
-                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        <div className="flex items-center justify-between gap-4 py-3 text-sm">
-                          <span className="text-zinc-600 dark:text-zinc-400">Najma&apos;s Agent 6864</span>
-                          <span className="font-medium text-zinc-900 dark:text-zinc-100">2 TB</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4 py-3 text-sm">
-                          <span className="text-zinc-600 dark:text-zinc-400">Matta Gant / Odin</span>
-                          <span className="font-medium text-zinc-900 dark:text-zinc-100">8 TB</span>
-                        </div>
-                      </div>
-                      <p className="text-sm text-zinc-600 dark:text-zinc-400">All 10 TB is allocated to these services.</p>
+                    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-zinc-600 dark:text-zinc-300">
+                      <span>Najma&apos;s Agent 6864 · 2 TB</span>
+                      <span>Matta Gant / Odin 8 TB</span>
+                      <span className="text-zinc-500">Fully allocated · no reserve</span>
                     </div>
-                  </div>
-                </section>
+                  </section>
+                </div>
               </div>
             )}
 
@@ -3805,7 +3800,11 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                                   </div>
                                   <div>
                                     <span className="block text-[9px] font-semibold uppercase tracking-wide text-zinc-400">Storage</span>
-                                    <span className="mt-1 block font-medium text-zinc-800 dark:text-zinc-200">{p.allocatedStorageGb} GB</span>
+                                    <span className="mt-1 block font-medium text-zinc-800 dark:text-zinc-200">
+                                      {p.allocatedStorageGb >= 1000
+                                        ? `${Number((p.allocatedStorageGb / 1000).toFixed(1))} TB`
+                                        : `${p.allocatedStorageGb} GB`}
+                                    </span>
                                   </div>
                                 </div>
                               </div>
@@ -4013,7 +4012,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                             >
                               <div className="flex justify-between items-center">
                                 <strong className="text-zinc-900 dark:text-white">OdinBot AI Hybrid</strong>
-                                <span className="px-1.5 py-0.5 rounded text-[9px] bg-purple-500/15 text-purple-600 font-mono">Oracle 45 TB</span>
+                                <span className="px-1.5 py-0.5 rounded text-[9px] bg-purple-500/15 text-purple-600 font-mono">Oracle 10 TB</span>
                               </div>
                               <p className="text-[11px] text-zinc-500">Linked to Marsabit server via WireGuard (42ms ping). Holds 1.84M Kenya Law embeddings.</p>
                             </div>
@@ -4485,8 +4484,8 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                 <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-3 font-mono text-xs">
                   <span className="text-[10px] text-zinc-400 uppercase">Storage Infrastructure</span>
                   <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 rounded-xl space-y-1">
-                    <p>razak-server Projects Partition: <strong>4,868 GB</strong> (Local)</p>
-                    <p>Oracle Cloud VPS High-Capacity Array: <strong>45 TB</strong> (AI Dedicated)</p>
+                    <p>razak-server Storage: <strong>9.34 TB used / 2.66 TB free</strong> (12 TB physical pool)</p>
+                    <p>Oracle Cloud VPS: <strong>10 TB allocated</strong> (AI services)</p>
                   </div>
                 </div>
               </div>
@@ -4500,12 +4499,11 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                 internetSpeed={internetSpeed}
                 uptimeSeconds={uptimeSeconds}
                 formatUptime={formatUptime}
-                showToast={showToast}
               />
             )}
 
             {/* ========================================================================= */}
-            {/* TAB 6: AI & INFRASTRUCTURE (ORACLE CLOUD VPS · 45 TB HIGH-CAPACITY ARRAY) */}
+            {/* TAB 6: AI & INFRASTRUCTURE (ORACLE CLOUD VPS · 10 TB ALLOCATION) */}
             {/* ========================================================================= */}
             {activeTab === 'ai_infra' && (
               <div className="space-y-6 animate-fadeIn">
@@ -4519,7 +4517,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                       </h2>
                     </div>
                     <p className="text-xs text-zinc-500 mt-1">
-                      Dedicated 45 TB Cloud Storage Array &middot; Completely separate from local razak-server &middot; Reserved for P3L AI &amp; OdinBot
+                      10 TB fully allocated cloud storage &middot; Separate from local razak-server &middot; Reserved for P3L AI &amp; OdinBot
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -4542,7 +4540,7 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                     <span>Two Separate Storage Pools: Bare-Metal Local vs. Oracle Cloud VPS</span>
                   </div>
                   <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed text-[11.5px]">
-                    The local server (<code className="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10.5px]">razak-server</code>) has <strong>4,868 GB</strong> dedicated for running client startup projects (with ~3 TB leftover free space). Storage for the AI is <strong>completely separate</strong>: hosted on high-performance <strong>Oracle Cloud VPS</strong> with a dedicated <strong>45 TB (45,000 GB)</strong> high-capacity NVMe array holding internal model weights, Kenya legal statutes, OCR pipelines, audio transcriptions, and the OdinBot neural memory.
+                    The local server (<code className="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10.5px]">razak-server</code>) has <strong>9.34 TB used and 2.66 TB free</strong> across its 12 TB physical pool. Cloud storage is separate: the <strong>Oracle Cloud VPS has 10 TB allocated</strong> across Najma&apos;s Agent 6864 (2 TB) and Matta Gant / Odin (8 TB).
                   </p>
                 </div>
 
@@ -4554,11 +4552,11 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                       <span className="text-[10px] text-zinc-400 uppercase">Oracle VPS Storage</span>
                       <Cloud className="w-4 h-4 text-blue-500" />
                     </div>
-                    <p className="text-xl font-bold text-zinc-900 dark:text-white">45 TB</p>
+                    <p className="text-xl font-bold text-zinc-900 dark:text-white">10 TB</p>
                     <p className="text-[11px] text-zinc-500">Dedicated AI &amp; Neural Bank</p>
                     <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex justify-between text-[10px]">
-                      <span className="text-zinc-400">Loaded: 14.2 TB</span>
-                      <span className="text-blue-500 font-bold">30.8 TB Reserve</span>
+                      <span className="text-zinc-400">Allocated: 10 TB</span>
+                      <span className="text-blue-500 font-bold">0 TB Reserve</span>
                     </div>
                   </div>
 
@@ -4605,31 +4603,30 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                   </div>
                 </div>
 
-                {/* 45 TB Storage Volume Breakdown Table */}
+                {/* 10 TB Oracle Cloud Allocation Breakdown */}
                 <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800 gap-2">
                     <div>
                       <h3 className="font-bold text-sm text-zinc-900 dark:text-white">
-                        Oracle Cloud VPS High-Capacity Volume Breakdown (45 TB Dedicated AI Bank)
+                        Oracle Cloud VPS Storage Allocation (10 TB Total)
                       </h3>
                       <p className="text-xs text-zinc-500">
                         NVMe cloud partitions reserved exclusively for OdinBot training weights, legal vectors, and multimodal media
                       </p>
                     </div>
                     <span className="px-2.5 py-1 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-xs font-bold self-start sm:self-auto">
-                      14.2 TB Loaded &middot; 30.8 TB Free Reserve
+                      10 TB Allocated &middot; 0 TB Reserve
                     </span>
                   </div>
 
                   {/* Visual Storage Bar */}
                   <div className="space-y-1.5 font-mono text-xs">
                     <div className="flex justify-between text-[11px] text-zinc-400">
-                      <span>Loaded Datasets &amp; Weights: 14.2 TB (31.5%)</span>
-                      <span className="text-blue-500 font-bold">Available Reserve: 30.8 TB (68.5%)</span>
+                      <span>Allocated datasets &amp; services: 10 TB (100%)</span>
+                      <span className="text-blue-500 font-bold">Available reserve: 0 TB (0%)</span>
                     </div>
                     <div className="w-full h-3 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden flex">
-                      <div className="bg-blue-600 h-full" style={{ width: '31.5%' }} title="Loaded Datasets: 14.2 TB"></div>
-                      <div className="bg-blue-400/20 h-full flex-1" title="Free Reserve: 30.8 TB"></div>
+                      <div className="bg-blue-600 h-full w-full" title="Allocated: 10 TB"></div>
                     </div>
                   </div>
 
@@ -4640,40 +4637,46 @@ export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentU
                         <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] text-zinc-400 uppercase">
                           <th className="py-2.5 px-3">Volume Namespace</th>
                           <th className="py-2.5 px-3">Mount Volume Path</th>
-                          <th className="py-2.5 px-3">Dedicated Capacity</th>
+                          <th className="py-2.5 px-3">Allocated Storage</th>
                           <th className="py-2.5 px-3">Purpose &amp; Data Pipeline</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
                         <tr>
+                          <td className="py-2.5 px-3 font-sans font-bold text-zinc-900 dark:text-white">Najma&apos;s Agent 6864</td>
+                          <td className="py-2.5 px-3 text-zinc-500">/ai_volumes/agents/najma</td>
+                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">2 TB</td>
+                          <td className="py-2.5 px-3 text-zinc-600 dark:text-zinc-300">Agent runtime, memory and working datasets</td>
+                        </tr>
+                        <tr>
                           <td className="py-2.5 px-3 font-sans font-bold text-zinc-900 dark:text-white">OdinBot Weights &amp; Checkpoints</td>
                           <td className="py-2.5 px-3 text-zinc-500">/ai_volumes/weights/odinbot_family</td>
-                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">14.2 TB</td>
+                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">2.4 TB</td>
                           <td className="py-2.5 px-3 text-zinc-600 dark:text-zinc-300">Base weights, LoRA adapters, legal reasoning checkpoint cache</td>
                         </tr>
                         <tr>
                           <td className="py-2.5 px-3 font-sans font-bold text-zinc-900 dark:text-white">Kenya Law Statutes &amp; Jurisprudence</td>
                           <td className="py-2.5 px-3 text-zinc-500">/ai_volumes/vectors/kenya_law_statutes</td>
-                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">8.5 TB</td>
+                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">2 TB</td>
                           <td className="py-2.5 px-3 text-zinc-600 dark:text-zinc-300">Complete eKLR rulings, Acts of Parliament, High Court precedents</td>
                         </tr>
                         <tr>
                           <td className="py-2.5 px-3 font-sans font-bold text-zinc-900 dark:text-white">Bilingual Speech &amp; Court Audio</td>
                           <td className="py-2.5 px-3 text-zinc-500">/ai_volumes/multimodal/audio_speech</td>
-                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">7.8 TB</td>
+                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">1.2 TB</td>
                           <td className="py-2.5 px-3 text-zinc-600 dark:text-zinc-300">Swahili/English legal transcriptions, audio corpus for Whisper Large-v3</td>
                         </tr>
                         <tr>
                           <td className="py-2.5 px-3 font-sans font-bold text-zinc-900 dark:text-white">RAG Document Vault &amp; Corporate Contracts</td>
                           <td className="py-2.5 px-3 text-zinc-500">/ai_volumes/rag_vault/contracts</td>
-                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">4.3 TB</td>
+                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">2.4 TB</td>
                           <td className="py-2.5 px-3 text-zinc-600 dark:text-zinc-300">Client contracts, deeds, conveyance statutory fee templates</td>
                         </tr>
                         <tr className="bg-blue-50/50 dark:bg-blue-950/20 font-bold">
-                          <td className="py-2.5 px-3 font-sans text-blue-900 dark:text-blue-300">High-Capacity Training Reserve Pool</td>
+                          <td className="py-2.5 px-3 font-sans text-blue-900 dark:text-blue-300">Unallocated reserve</td>
                           <td className="py-2.5 px-3 text-blue-700 dark:text-blue-400">/ai_volumes/reserved_training</td>
-                          <td className="py-2.5 px-3 text-blue-600 dark:text-blue-400">10.2 TB Free</td>
-                          <td className="py-2.5 px-3 text-blue-800 dark:text-blue-300">Unallocated scratch array for next-generation fine-tuning pipelines</td>
+                          <td className="py-2.5 px-3 text-blue-600 dark:text-blue-400">0 TB</td>
+                          <td className="py-2.5 px-3 text-blue-800 dark:text-blue-300">No free space shown; listed allocation totals the configured 10 TB</td>
                         </tr>
                       </tbody>
                     </table>

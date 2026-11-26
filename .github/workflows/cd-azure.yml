@@ -46,6 +46,7 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || 'https://nyagahkithinji-advocates.azurewebsites.net' }}
+          VITE_PUBLIC_APP_URL: ${{ secrets.VITE_PUBLIC_APP_URL || 'https://nyagahkithinji-advocates.azurewebsites.net' }}
 
   deploy-to-azure:
     name: 🚀 Deploy to Microsoft Azure (${{ github.ref == 'refs/heads/main' && 'Production' || 'Staging' }})
@@ -53,7 +54,6 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.event.inputs.target_environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
-      url: ${{ env.DEPLOYED_APP_URL }}
     env:
       TARGET_ENV: ${{ github.event.inputs.target_environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
       AZURE_REGISTRY_SERVER: ${{ secrets.AZURE_REGISTRY_SERVER }}
@@ -96,6 +96,8 @@ jobs:
           build-args: |
             VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
             VITE_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+            VITE_PUBLIC_APP_URL=${{ secrets.VITE_PUBLIC_APP_URL || 'https://nyagahkithinji-advocates.azurewebsites.net' }}
+            VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL || 'https://nyagahkithinji-advocates.azurewebsites.net' }}
           tags: |
             ${{ secrets.AZURE_REGISTRY_SERVER }}/karani-frontend:${{ github.sha }}
             ${{ secrets.AZURE_REGISTRY_SERVER }}/karani-frontend:${{ env.ENVIRONMENT_TAG }}
@@ -103,9 +105,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build & Push Payment Gateway Image to ACR
+        if: env.AZURE_REGISTRY_SERVER != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend/payment_gateway
+          file: ./backend/payment_gateway/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.AZURE_REGISTRY_SERVER }}/karani-payment-gateway:${{ github.sha }}
+            ${{ secrets.AZURE_REGISTRY_SERVER }}/karani-payment-gateway:${{ env.ENVIRONMENT_TAG }}
+            ${{ secrets.AZURE_REGISTRY_SERVER }}/karani-payment-gateway:latest
+
       - name: Prepare Multi-Container Deployment Spec
         run: |
-          sed -i "s|\${IMAGE_TAG:-latest}|latest|g" ./azure/docker-compose.azure.yml
+          sed -i "s|\${IMAGE_TAG:-latest}|${ENVIRONMENT_TAG}|g" ./azure/docker-compose.azure.yml
           sed -i "s|\${AZURE_REGISTRY_SERVER:-acrnyagahfee.azurecr.io}|${{ secrets.AZURE_REGISTRY_SERVER }}|g" ./azure/docker-compose.azure.yml
 
       - name: Deploy to Azure Web App for Containers
@@ -119,11 +133,14 @@ jobs:
       - name: Post-Deployment Zero-Downtime Health Verification
         run: |
           echo "Verifying deployment health at: $DEPLOYED_APP_URL"
-          sleep 10
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$DEPLOYED_APP_URL" || echo "000")
-          echo "Health Check HTTP Status: $STATUS"
-          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
-            echo "✅ Deployment verified healthy on $TARGET_ENV!"
-          else
-            echo "⚠️ Deployment notification: HTTP status $STATUS. Probe pending application warmup."
-          fi
+          for attempt in {1..8}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$DEPLOYED_APP_URL" || true)
+            echo "Health check $attempt/8: HTTP $STATUS"
+            if [[ "$STATUS" =~ ^[23][0-9][0-9]$ ]]; then
+              echo "Deployment verified healthy on $TARGET_ENV."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Deployment health check failed after 8 attempts."
+          exit 1

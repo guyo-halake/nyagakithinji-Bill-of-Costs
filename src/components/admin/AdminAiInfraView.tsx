@@ -211,14 +211,14 @@ export const AdminAiInfraView: React.FC<AdminAiInfraViewProps> = ({ showToast })
             </div>
           </div>
 
-          {/* Real Storage Role: Oracle Cloud 45 TB is for TRAINING, not hosting */}
+          {/* Oracle Cloud's 10 TB allocation is for training, not application hosting. */}
           <div className="p-5 rounded-2xl bg-zinc-950 text-white border border-zinc-800 space-y-3 font-mono text-xs">
             <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
               <span className="font-bold text-amber-400 font-sans text-sm flex items-center gap-2">
                 <HardDrive className="w-4 h-4" />
                 Training &amp; Server Storage Roles
               </span>
-              <span className="text-[10px] text-zinc-400">Accurate Breakdown</span>
+              <span className="text-[10px] text-amber-300">Illustrative allocation</span>
             </div>
             
             <div className="space-y-2 text-[11px] font-sans text-zinc-300">
@@ -230,7 +230,7 @@ export const AdminAiInfraView: React.FC<AdminAiInfraViewProps> = ({ showToast })
               </div>
 
               <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
-                <strong className="text-white block font-mono text-xs text-blue-400">2. Oracle Cloud VPS (45 TB Fast Block Storage):</strong>
+                <strong className="text-white block font-mono text-xs text-blue-400">2. Oracle Cloud VPS (10 TB allocated):</strong>
                 <p className="text-zinc-400">
                   This cloud storage is Guyo's <strong>training storage</strong>. It holds massive datasets, large-scale model checkpoints, raw archives, and heavy fine-tuning jobs. The AI itself runs on Guyo's server.
                 </p>
