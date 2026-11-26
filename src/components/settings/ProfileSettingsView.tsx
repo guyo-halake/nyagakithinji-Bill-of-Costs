@@ -40,7 +40,8 @@ import {
   RotateCcw,
   FileSpreadsheet
 } from 'lucide-react';
-import { supabase, SystemUser, EXACT_FIRM_INFO, getFeeNotes, saveUserProfile } from '../../services/supabase';
+import { supabase, SystemUser, getFeeNotes, saveUserProfile } from '../../services/supabase';
+import { getPasswordRecoveryErrorMessage } from '../../services/auth';
 import { logSystemActivity } from '../../services/activityLogger';
 import { hasPermission } from '../../services/rbac';
 
@@ -131,19 +132,25 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
       if (active.id) {
         try {
           const { data, error } = await supabase.from('users').select('*').eq('id', active.id).single();
-          if (!error && data) {
-            setUserFullName(data.full_name || active.fullName || '');
-            setUserTitle(cleanTitle(data.advocate_title, data.full_name || active.fullName));
-            setUserLskNo(data.lsk_no || active.lskNo || '');
-            setUserPosition(data.position || active.position || '');
-            setUserDepartment(data.department || active.department || '');
-            setUserWorkEmail(data.work_email || active.workEmail || '');
-            setUserPersonalEmail(data.personal_email || active.personalEmail || '');
-            setUserPhonePrimary(data.phone_primary || active.phonePrimary || '');
-            setUserPhoneSecondary(data.phone_secondary || active.phoneSecondary || '');
-            setUserAvatarUrl(data.avatar_url || active.avatarUrl || '');
+          if (error) {
+            showToast(`Could not load profile: ${error.message}`);
+            return;
           }
-        } catch (e) {}
+          if (data) {
+            setUserFullName(data.full_name || '');
+            setUserTitle(cleanTitle(data.advocate_title, data.full_name));
+            setUserLskNo(data.lsk_no || '');
+            setUserPosition(data.position || '');
+            setUserDepartment(data.department || '');
+            setUserWorkEmail(data.work_email || '');
+            setUserPersonalEmail(data.personal_email || '');
+            setUserPhonePrimary(data.phone_primary || '');
+            setUserPhoneSecondary(data.phone_secondary || '');
+            setUserAvatarUrl(data.avatar_url || '');
+          }
+        } catch (error) {
+          showToast(error instanceof Error ? `Could not load profile: ${error.message}` : 'Could not load profile.');
+        }
       }
     };
     syncRemoteUser();
@@ -153,85 +160,67 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
   // MODULE 2: FIRM BRANDING & INSTITUTIONAL CHARTER STATE
   // --------------------------------------------------------------------------
   const [isEditingFirm, setIsEditingFirm] = useState(false);
-  const [firmSettings, setFirmSettings] = useState(() => {
-    const saved = localStorage.getItem('BILLSZIP_FIRM_SETTINGS');
-    if (saved) {
-      try { 
-        const parsed = JSON.parse(saved);
-        return {
-          topbarTitle: parsed.topbarTitle || EXACT_FIRM_INFO.name || 'Nyagah B. Kithinji & Co. Advocates',
-          topbarSubtitle: parsed.topbarSubtitle || (EXACT_FIRM_INFO as any).title || 'Advocates of the High Court of Kenya',
-          lskRegNo: parsed.lskRegNo || (EXACT_FIRM_INFO as any).firmRegNo || 'P.105/1992',
-          managingPartner: parsed.managingPartner || (EXACT_FIRM_INFO as any).managingPartner || 'Nyagah B. Kithinji',
-          logoUrl: parsed.logoUrl || EXACT_FIRM_INFO.logoUrl || '/logo.png',
-          poBox: parsed.poBox || EXACT_FIRM_INFO.poBox || 'P.O. Box 1992-00100, Nairobi, Kenya',
-          address: parsed.address || EXACT_FIRM_INFO.address || 'Suite 4B, Mbaruk Road, Off Muchai Drive, Golf Course Estate, Upper Hill, Nairobi',
-          serviceEmail: parsed.serviceEmail || (EXACT_FIRM_INFO as any).serviceEmail || 'service@nbkco-advocates.com',
-          phone: parsed.phone || EXACT_FIRM_INFO.phone || '+254 (0)20 271 8890 / +254 722 000 111',
-          email: parsed.email || EXACT_FIRM_INFO.email || 'info@nbkco-advocates.com',
-          kraPin: parsed.kraPin || EXACT_FIRM_INFO.kraPin || 'P051123456Z',
-          vatNumber: parsed.vatNumber || (EXACT_FIRM_INFO as any).vatNumber || 'VAT-0192834-K',
-          officeBankName: parsed.officeBankName || 'KCB Bank Kenya Ltd',
-          officeAccountName: parsed.officeAccountName || 'Nyagah B. Kithinji & Co Office A/C',
-          officeBranch: parsed.officeBranch || 'Kilimani Branch',
-          officeAccountNo: parsed.officeAccountNo || '1104889922',
-          officeSwift: parsed.officeSwift || 'KCBLKENX',
-          clientTrustBankName: parsed.clientTrustBankName || 'Standard Chartered Bank',
-          clientTrustAccountName: parsed.clientTrustAccountName || 'Nyagah B. Kithinji & Co Clients / Trust A/C',
-          clientTrustBranch: parsed.clientTrustBranch || 'Kenyatta Avenue',
-          clientTrustAccountNo: parsed.clientTrustAccountNo || '010203040506',
-          clientTrustSwift: parsed.clientTrustSwift || 'SCBLKENX',
-          mpesaPaybill: parsed.mpesaPaybill || '522522',
-          mpesaAccountRef: parsed.mpesaAccountRef || 'MATTER NO / CLIENT NAME',
-          bankDetails: parsed.bankDetails || EXACT_FIRM_INFO.bankDetails || 'KCB Bank Kenya Ltd | Kilimani Branch | A/C No: 1104889922 | Swift: KCBLKENX',
-          stampUrl: parsed.stampUrl || localStorage.getItem('karani_firm_stamp_url') || '/stamp.png'
-        };
-      } catch (e) {}
-    }
-    return {
-      topbarTitle: EXACT_FIRM_INFO.name || 'Nyagah B. Kithinji & Co. Advocates',
-      topbarSubtitle: (EXACT_FIRM_INFO as any).title || 'Advocates of the High Court of Kenya',
-      lskRegNo: (EXACT_FIRM_INFO as any).firmRegNo || 'P.105/1992',
-      managingPartner: (EXACT_FIRM_INFO as any).managingPartner || 'Nyagah B. Kithinji',
-      logoUrl: EXACT_FIRM_INFO.logoUrl || '/logo.png',
-      poBox: EXACT_FIRM_INFO.poBox || 'P.O. Box 1992-00100, Nairobi, Kenya',
-      address: EXACT_FIRM_INFO.address || 'Suite 4B, Mbaruk Road, Off Muchai Drive, Golf Course Estate, Upper Hill, Nairobi',
-      serviceEmail: (EXACT_FIRM_INFO as any).serviceEmail || 'service@nbkco-advocates.com',
-      phone: EXACT_FIRM_INFO.phone || '+254 (0)20 271 8890 / +254 722 000 111',
-      email: EXACT_FIRM_INFO.email || 'info@nbkco-advocates.com',
-      kraPin: EXACT_FIRM_INFO.kraPin || 'P051123456Z',
-      vatNumber: (EXACT_FIRM_INFO as any).vatNumber || 'VAT-0192834-K',
-      officeBankName: 'KCB Bank Kenya Ltd',
-      officeAccountName: 'Nyagah B. Kithinji & Co Office A/C',
-      officeBranch: 'Kilimani Branch',
-      officeAccountNo: '1104889922',
-      officeSwift: 'KCBLKENX',
-      clientTrustBankName: 'Standard Chartered Bank',
-      clientTrustAccountName: 'Nyagah B. Kithinji & Co Clients / Trust A/C',
-      clientTrustBranch: 'Kenyatta Avenue',
-      clientTrustAccountNo: '010203040506',
-      clientTrustSwift: 'SCBLKENX',
-      mpesaPaybill: '522522',
-      mpesaAccountRef: 'MATTER NO / CLIENT NAME',
-      bankDetails: EXACT_FIRM_INFO.bankDetails || 'KCB Bank Kenya Ltd | Kilimani Branch | A/C No: 1104889922 | Swift: KCBLKENX',
-      stampUrl: localStorage.getItem('karani_firm_stamp_url') || '/stamp.png'
-    };
-  });
+  const [firmSettings, setFirmSettings] = useState<Record<string, string>>({});
 
-  // Hydrate Firm Settings from backend persistent store on mount
+  // Load firm settings from the signed-in firm's database record.
   useEffect(() => {
     let isMounted = true;
-    fetch('/api/v1/users/firm-settings')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (isMounted && data && Object.keys(data).length > 0) {
-          setFirmSettings(prev => ({ ...prev, ...data }));
-          localStorage.setItem('BILLSZIP_FIRM_SETTINGS', JSON.stringify({ ...firmSettings, ...data }));
+    const firmId = currentUser?.firmId;
+    if (!firmId) {
+      showToast('Sign in to load your firm settings.');
+      return () => { isMounted = false; };
+    }
+
+    void (async () => {
+      try {
+        const { data, error } = await supabase.from('firms').select('*').eq('id', firmId).single();
+        if (!isMounted) return;
+        if (error) {
+          showToast(`Could not load firm settings: ${error.message}`);
+          return;
         }
-      })
-      .catch(() => {});
+
+        const databaseSettings: Record<string, string> = {
+          topbarTitle: data.name || '',
+          topbarSubtitle: data.topbar_subtitle || '',
+          lskRegNo: data.firm_reg_no || '',
+          firmRegNo: data.firm_reg_no || '',
+          managingPartner: data.managing_partner || '',
+          logoUrl: data.logo_url || '',
+          poBox: data.po_box || '',
+          address: data.address || '',
+          serviceEmail: data.service_email || '',
+          phone: data.phone || '',
+          email: data.email || '',
+          taxationEmail: data.taxation_email || '',
+          billingEmail: data.billing_email || '',
+          kraPin: data.kra_pin || '',
+          vatNumber: data.vat_number || '',
+          website: data.website || '',
+          officeBankName: data.office_bank_name || '',
+          officeAccountName: data.office_account_name || '',
+          officeBranch: data.office_branch || '',
+          officeAccountNo: data.office_account_no || '',
+          officeSwift: data.office_swift || '',
+          clientTrustBankName: data.client_trust_bank_name || '',
+          clientTrustAccountName: data.client_trust_account_name || '',
+          clientTrustBranch: data.client_trust_branch || '',
+          clientTrustAccountNo: data.client_trust_account_no || '',
+          clientTrustSwift: data.client_trust_swift || '',
+          mpesaPaybill: data.mpesa_paybill || '',
+          mpesaAccountRef: data.mpesa_account_ref || '',
+          bankDetails: data.bank_details || '',
+          stampUrl: localStorage.getItem('karani_firm_stamp_url') || ''
+        };
+        setFirmSettings(databaseSettings);
+        localStorage.setItem('BILLSZIP_FIRM_SETTINGS', JSON.stringify(databaseSettings));
+        window.dispatchEvent(new CustomEvent('firmSettingsChanged', { detail: databaseSettings }));
+      } catch (error) {
+        if (isMounted) showToast(error instanceof Error ? error.message : 'Could not load firm settings.');
+      }
+    })();
     return () => { isMounted = false; };
-  }, []);
+  }, [currentUser?.firmId]);
 
 
   // --------------------------------------------------------------------------
@@ -445,9 +434,9 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
   };
 
   const handleResetStamp = () => {
-    setFirmSettings((prev: any) => ({ ...prev, stampUrl: '/stamp.png' }));
+    setFirmSettings((prev: Record<string, string>) => ({ ...prev, stampUrl: '' }));
     localStorage.removeItem('karani_firm_stamp_url');
-    showToast('Firm stamp reset to default seal.');
+    showToast('Firm stamp removed.');
   };
 
   // Cancel editing profile and restore original values
@@ -475,23 +464,12 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
     }
     setIsSendingResetEmail(true);
     try {
-      try {
-        await fetch('/api/v1/email/password-reset-request', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: targetEmail, portal_url: window.location.origin }),
-        });
-      } catch (e) {}
-
-      try {
-        await supabase.auth.resetPasswordForEmail(targetEmail, {
-          redirectTo: `${window.location.origin}/?view=reset-password`,
-        });
-      } catch (e) {}
-
-      showToast(`Password reset link dispatched to ${targetEmail}`);
+      const redirectTo = new URL('/reset-password', window.location.origin).toString();
+      const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, { redirectTo });
+      if (error) throw error;
+      showToast(`If a Supabase account exists for ${targetEmail}, a reset link has been sent.`);
     } catch (err: any) {
-      showToast('Could not dispatch password reset link.');
+      showToast(getPasswordRecoveryErrorMessage(err));
     } finally {
       setIsSendingResetEmail(false);
     }
@@ -511,29 +489,15 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
 
     setIsUpdatingPassword(true);
     try {
-      if (currentUser?.id) {
-        await supabase.from('users').update({ password_hash: newPassword }).eq('id', currentUser.id);
-      }
-      try {
-        await supabase.auth.updateUser({ password: newPassword });
-      } catch (e) {}
-
-      const stored = localStorage.getItem('EXACT_USERS');
-      if (stored) {
-        const list = JSON.parse(stored);
-        const idx = list.findIndex((u: any) => u.id === currentUser?.id || (u.workEmail && u.workEmail.toLowerCase() === (userWorkEmail || '').toLowerCase()));
-        if (idx !== -1) {
-          list[idx].passwordHash = newPassword;
-          localStorage.setItem('EXACT_USERS', JSON.stringify(list));
-        }
-      }
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
 
       setNewPassword('');
       setConfirmPassword('');
       setShowPasswordModal(false);
       showToast('Password updated successfully.');
     } catch (err: any) {
-      showToast('Failed to update password.');
+      showToast(err?.message || 'Failed to update password.');
     } finally {
       setIsUpdatingPassword(false);
     }
@@ -543,125 +507,79 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
   const handleSaveProfile = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const active = getActiveUser();
-    const baseId = currentUser?.id || active.id || 'b0000000-0000-0000-0000-000000000004';
-    const baseEmail = (userWorkEmail.trim() || currentUser?.workEmail || active.workEmail || 'guyohalakeofficial@gmail.com').toLowerCase();
+    const baseId = currentUser?.id || active.id;
+    const firmId = currentUser?.firmId || active.firmId;
+    if (!baseId || !firmId) {
+      showToast('Your signed-in profile could not be matched to a firm account.');
+      return;
+    }
 
     try {
       const mergedUser: SystemUser = {
-        ...(currentUser || active || {} as any),
+        ...(currentUser || active as SystemUser),
         id: baseId,
-        fullName: userFullName.trim() || currentUser?.fullName || active.fullName || 'Senior Advocate',
-        advocateTitle: userTitle.trim() || userFullName.trim() || currentUser?.fullName || active.fullName || 'Senior Advocate',
+        fullName: userFullName.trim(),
+        advocateTitle: userTitle.trim(),
         lskNo: userLskNo.trim(),
-        position: userPosition.trim() || currentUser?.position || active.position || 'Senior Managing Partner',
-        department: userDepartment.trim() || currentUser?.department || active.department || 'Litigation & Commercial',
-        workEmail: baseEmail,
-        personalEmail: (userPersonalEmail.trim() || currentUser?.personalEmail || active.personalEmail || baseEmail).toLowerCase(),
+        position: userPosition.trim(),
+        department: userDepartment.trim(),
+        workEmail: userWorkEmail.trim().toLowerCase(),
+        personalEmail: userPersonalEmail.trim().toLowerCase(),
         phonePrimary: userPhonePrimary.trim(),
         phoneSecondary: userPhoneSecondary.trim(),
-        avatarUrl: userAvatarUrl || currentUser?.avatarUrl || active.avatarUrl,
-        role: currentUser?.role || active.role || 'Admin',
-        hasAllPermissions: true,
-        passwordHash: currentUser?.passwordHash || (active as any)?.passwordHash || 'Nyagah@2026',
-        firmId: currentUser?.firmId || active.firmId || 'a0000000-0000-0000-0000-000000000001'
+        avatarUrl: userAvatarUrl || undefined,
+        role: currentUser?.role || active.role || 'Advocate',
+        hasAllPermissions: currentUser?.hasAllPermissions || false,
+        passwordHash: '',
+        firmId
       };
 
-      // 1. Immediately persist to localStorage BILLSZIP_SESSION and EXACT_USERS roster
-      saveUserProfile(mergedUser);
-      localStorage.setItem('BILLSZIP_SESSION', JSON.stringify(mergedUser));
-      window.dispatchEvent(new CustomEvent('userProfileUpdated', { detail: mergedUser }));
-
-      // 2. Persist to Backend Python Engine so future logins return the updated record
-      try {
-        await fetch('/api/v1/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: mergedUser.id,
-            fullName: mergedUser.fullName,
-            advocateTitle: mergedUser.advocateTitle,
-            lskNo: mergedUser.lskNo,
-            role: mergedUser.role,
-            position: mergedUser.position,
-            department: mergedUser.department,
-            workEmail: mergedUser.workEmail,
-            personalEmail: mergedUser.personalEmail,
-            phonePrimary: mergedUser.phonePrimary,
-            phoneSecondary: mergedUser.phoneSecondary,
-            avatarUrl: mergedUser.avatarUrl,
-            firmId: mergedUser.firmId || 'firm-001'
-          })
-        });
-      } catch (backendErr) {
-        console.warn('Backend user profile sync notice:', backendErr);
+      if (!mergedUser.fullName || !mergedUser.workEmail) {
+        showToast('Full name and work email are required.');
+        return;
       }
 
-      // 3. Persist to Supabase public.users using exact supported table columns + permissions JSONB
-      let dbUpdated = false;
-      let dbErrorMessage = '';
-      try {
-        const supabaseData: any = {
-          full_name: mergedUser.fullName,
-          lsk_no: mergedUser.lskNo,
-          role: (mergedUser.role || 'admin').toLowerCase(),
-          is_active: true,
-          permissions: {
-            can_manage_matters: true,
-            can_access_taxation: true,
-            can_approve_fee_notes: true,
-            position: mergedUser.position,
-            department: mergedUser.department,
-            phone_primary: mergedUser.phonePrimary,
-            phone_secondary: mergedUser.phoneSecondary
-          }
-        };
-        if (mergedUser.avatarUrl) {
-          supabaseData.avatar_url = mergedUser.avatarUrl;
-        }
-        if (mergedUser.workEmail) {
-          supabaseData.email = mergedUser.workEmail;
-        }
+      const { data, error } = await supabase.from('users').update({
+        full_name: mergedUser.fullName,
+        advocate_title: mergedUser.advocateTitle || null,
+        lsk_no: mergedUser.lskNo || null,
+        position: mergedUser.position || null,
+        department: mergedUser.department || null,
+        email: mergedUser.workEmail,
+        personal_email: mergedUser.personalEmail || null,
+        phone_primary: mergedUser.phonePrimary || null,
+        phone_secondary: mergedUser.phoneSecondary || null,
+        avatar_url: mergedUser.avatarUrl?.startsWith('data:') ? null : mergedUser.avatarUrl || null
+      }).eq('id', mergedUser.id).eq('firm_id', firmId).select('*').single();
+      if (error) throw error;
 
-        // Try updating by ID first, then by email
-        let updateRes = await supabase
-          .from('users')
-          .update(supabaseData)
-          .eq('id', mergedUser.id);
-
-        if (updateRes.error || updateRes.count === 0) {
-          updateRes = await supabase
-            .from('users')
-            .update(supabaseData)
-            .ilike('email', mergedUser.workEmail);
-        }
-
-        if (updateRes.error) {
-          dbErrorMessage = updateRes.error.message;
-        } else {
-          dbUpdated = true;
-        }
-      } catch (sbErr: any) {
-        dbErrorMessage = sbErr?.message || 'Database connection issue';
-      }
+      const savedUser: SystemUser = {
+        ...mergedUser,
+        fullName: data.full_name,
+        advocateTitle: data.advocate_title || '',
+        lskNo: data.lsk_no || '',
+        position: data.position || '',
+        department: data.department || '',
+        workEmail: data.email,
+        personalEmail: data.personal_email || '',
+        phonePrimary: data.phone_primary || '',
+        phoneSecondary: data.phone_secondary || '',
+        avatarUrl: data.avatar_url || undefined
+      };
+      saveUserProfile(savedUser);
+      localStorage.setItem('BILLSZIP_SESSION', JSON.stringify(savedUser));
 
       logSystemActivity(
-        mergedUser.fullName,
+        savedUser.fullName,
         'updated profile coordinates and preferences',
         'profile',
         'bg-blue-500'
       );
 
       setIsEditingProfile(false);
-      if (dbUpdated) {
-        showToast('Profile updated and saved to database successfully!');
-      } else if (dbErrorMessage) {
-        showToast(`Profile saved locally. Database update failed: ${dbErrorMessage}`);
-      } else {
-        showToast('Profile updated and saved successfully.');
-      }
+      showToast('Profile updated and saved to the database.');
     } catch (err: any) {
       showToast(err.message || 'Profile save failed.');
-      setIsEditingProfile(false);
     }
   };
 
@@ -678,61 +596,110 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
 
   // Save Firm Branding Settings
   const handleSaveFirmSettings = async () => {
-    const combinedBank = `${firmSettings.officeBankName || 'KCB Bank'} • A/C: ${firmSettings.officeAccountNo || ''} • Branch: ${firmSettings.officeBranch || ''} • Swift: ${firmSettings.officeSwift || ''} | Clients A/C: ${firmSettings.clientTrustBankName || ''} • A/C: ${firmSettings.clientTrustAccountNo || ''}`;
-    
-    const updatedSettings = {
+    const firmId = currentUser?.firmId;
+    if (!firmId) {
+      showToast('Sign in to save your firm settings.');
+      return;
+    }
+
+    if (!firmSettings.topbarTitle?.trim() || !firmSettings.lskRegNo?.trim() || !firmSettings.email?.trim()) {
+      showToast('Firm name, registration number and general email are required.');
+      return;
+    }
+
+    const updatedSettings: Record<string, string> = {
       ...firmSettings,
       bankName: firmSettings.officeBankName,
       bankBranch: firmSettings.officeBranch,
       bankAccount: firmSettings.officeAccountNo,
       swiftCode: firmSettings.officeSwift,
       firmRegNo: firmSettings.lskRegNo,
-      stampUrl: firmSettings.stampUrl || localStorage.getItem('karani_firm_stamp_url') || '/stamp.png',
-      bankDetails: firmSettings.bankDetails || combinedBank
+      stampUrl: firmSettings.stampUrl || localStorage.getItem('karani_firm_stamp_url') || '',
+      bankDetails: firmSettings.bankDetails || ''
     };
 
-    localStorage.setItem('BILLSZIP_FIRM_SETTINGS', JSON.stringify(updatedSettings));
-    if (updatedSettings.stampUrl) {
-      localStorage.setItem('karani_firm_stamp_url', updatedSettings.stampUrl);
-    }
-    window.dispatchEvent(new CustomEvent('firmSettingsChanged', { detail: updatedSettings }));
-    
-    // Sync to backend persistent store
     try {
-      await fetch('/api/v1/users/firm-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedSettings)
-      });
-    } catch (e) {
-      console.warn('Backend firm settings sync notice:', e);
+      const { data, error } = await supabase.from('firms').update({
+        name: updatedSettings.topbarTitle.trim(),
+        topbar_subtitle: updatedSettings.topbarSubtitle || null,
+        firm_reg_no: updatedSettings.lskRegNo.trim(),
+        managing_partner: updatedSettings.managingPartner || null,
+        address: updatedSettings.address || null,
+        po_box: updatedSettings.poBox || null,
+        phone: updatedSettings.phone || null,
+        email: updatedSettings.email.trim(),
+        service_email: updatedSettings.serviceEmail || null,
+        taxation_email: updatedSettings.taxationEmail || null,
+        billing_email: updatedSettings.billingEmail || null,
+        kra_pin: updatedSettings.kraPin || null,
+        vat_number: updatedSettings.vatNumber || null,
+        website: updatedSettings.website || null,
+        bank_details: updatedSettings.bankDetails || null,
+        logo_url: updatedSettings.logoUrl || null,
+        office_bank_name: updatedSettings.officeBankName || null,
+        office_account_name: updatedSettings.officeAccountName || null,
+        office_branch: updatedSettings.officeBranch || null,
+        office_account_no: updatedSettings.officeAccountNo || null,
+        office_swift: updatedSettings.officeSwift || null,
+        client_trust_bank_name: updatedSettings.clientTrustBankName || null,
+        client_trust_account_name: updatedSettings.clientTrustAccountName || null,
+        client_trust_branch: updatedSettings.clientTrustBranch || null,
+        client_trust_account_no: updatedSettings.clientTrustAccountNo || null,
+        client_trust_swift: updatedSettings.clientTrustSwift || null,
+        mpesa_paybill: updatedSettings.mpesaPaybill || null,
+        mpesa_account_ref: updatedSettings.mpesaAccountRef || null
+      }).eq('id', firmId).select('*').single();
+      if (error) throw error;
+
+      const savedSettings = {
+        ...updatedSettings,
+        topbarTitle: data.name || '',
+        topbarSubtitle: data.topbar_subtitle || '',
+        lskRegNo: data.firm_reg_no || '',
+        firmRegNo: data.firm_reg_no || '',
+        managingPartner: data.managing_partner || '',
+        logoUrl: data.logo_url || '',
+        address: data.address || '',
+        poBox: data.po_box || '',
+        phone: data.phone || '',
+        email: data.email || '',
+        serviceEmail: data.service_email || '',
+        taxationEmail: data.taxation_email || '',
+        billingEmail: data.billing_email || '',
+        kraPin: data.kra_pin || '',
+        vatNumber: data.vat_number || '',
+        website: data.website || '',
+        officeBankName: data.office_bank_name || '',
+        officeAccountName: data.office_account_name || '',
+        officeBranch: data.office_branch || '',
+        officeAccountNo: data.office_account_no || '',
+        officeSwift: data.office_swift || '',
+        clientTrustBankName: data.client_trust_bank_name || '',
+        clientTrustAccountName: data.client_trust_account_name || '',
+        clientTrustBranch: data.client_trust_branch || '',
+        clientTrustAccountNo: data.client_trust_account_no || '',
+        clientTrustSwift: data.client_trust_swift || '',
+        mpesaPaybill: data.mpesa_paybill || '',
+        mpesaAccountRef: data.mpesa_account_ref || '',
+        bankDetails: data.bank_details || '',
+        stampUrl: updatedSettings.stampUrl
+      };
+      setFirmSettings(savedSettings);
+      localStorage.setItem('BILLSZIP_FIRM_SETTINGS', JSON.stringify(savedSettings));
+      window.dispatchEvent(new CustomEvent('firmSettingsChanged', { detail: savedSettings }));
+      if (savedSettings.stampUrl) localStorage.setItem('karani_firm_stamp_url', savedSettings.stampUrl);
+
+      logSystemActivity(
+        currentUser?.fullName || 'Firm member',
+        'updated firm details',
+        'settings',
+        'bg-purple-500'
+      );
+      setIsEditingFirm(false);
+      showToast('Firm settings saved to the database.');
+    } catch (error) {
+      showToast(error instanceof Error ? `Could not save firm settings: ${error.message}` : 'Could not save firm settings.');
     }
-
-    // Direct sync to Supabase firms table if accessible
-    const firmId = currentUser?.firmId || 'a0000000-0000-0000-0000-000000000001';
-    try {
-      await supabase.from('firms').upsert({
-        id: firmId,
-        name: updatedSettings.topbarTitle,
-        firm_reg_no: updatedSettings.lskRegNo || 'P.105/1992',
-        address: updatedSettings.address,
-        po_box: updatedSettings.poBox,
-        phone: updatedSettings.phone,
-        email: updatedSettings.email,
-        kra_pin: updatedSettings.kraPin,
-        bank_details: updatedSettings.bankDetails,
-        logo_url: updatedSettings.logoUrl
-      });
-    } catch (e) {}
-
-    logSystemActivity(
-      currentUser?.fullName || 'Managing Partner',
-      `updated firm legal charter, logo, stamp, and banking coordinates: ${updatedSettings.topbarTitle}`,
-      'settings',
-      'bg-purple-500'
-    );
-    setIsEditingFirm(false);
-    showToast('Firm settings, logo, stamp & banking saved and synchronized across all views.');
   };
 
   // Save Calculator & Fee Engine
@@ -1438,11 +1405,11 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
                 {/* Official Firm Stamp */}
                 <div className="relative group shrink-0">
                   <img
-                    src={firmSettings.stampUrl || '/stamp.png'}
+                    src={firmSettings.stampUrl}
                     alt="Official Firm Stamp"
                     onError={(e) => {
                       e.currentTarget.onerror = null;
-                      e.currentTarget.src = '/stamp.png';
+                      e.currentTarget.hidden = true;
                     }}
                     className="h-20 max-w-[110px] w-auto object-contain p-1.5 rounded-2xl bg-slate-50 dark:bg-zinc-800 border border-[var(--border-color)] shadow-xs"
                   />
@@ -1662,7 +1629,7 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
                       <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
                         <div>
                           <span className="text-[9.5px] text-slate-400 block uppercase">Bank Name</span>
-                          <span className="font-semibold text-slate-800 dark:text-zinc-200">{firmSettings.officeBankName || 'KCB Bank Kenya Ltd'}</span>
+                          <span className="font-semibold text-slate-800 dark:text-zinc-200">{firmSettings.officeBankName || '—'}</span>
                         </div>
                         <div>
                           <span className="text-[9.5px] text-slate-400 block uppercase">Branch</span>
@@ -1697,7 +1664,7 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
                       <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
                         <div>
                           <span className="text-[9.5px] text-slate-400 block uppercase">Bank Name</span>
-                          <span className="font-semibold text-slate-800 dark:text-zinc-200">{firmSettings.clientTrustBankName || 'Standard Chartered Bank'}</span>
+                          <span className="font-semibold text-slate-800 dark:text-zinc-200">{firmSettings.clientTrustBankName || '—'}</span>
                         </div>
                         <div>
                           <span className="text-[9.5px] text-slate-400 block uppercase">Branch</span>
@@ -1795,9 +1762,9 @@ export const ProfileSettingsView: React.FC<SettingsProps> = ({
                       </div>
                       <div className="flex items-center gap-3">
                         <img
-                          src={firmSettings.stampUrl || '/stamp.png'}
+                          src={firmSettings.stampUrl}
                           alt="Firm Stamp"
-                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/stamp.png'; }}
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.hidden = true; }}
                           className="h-14 w-auto max-w-[100px] object-contain p-1 border border-[var(--border-color)] rounded-lg bg-white dark:bg-zinc-800"
                         />
                         <div className="flex flex-col gap-1.5">

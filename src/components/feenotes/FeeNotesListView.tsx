@@ -119,9 +119,21 @@ export const FeeNotesListView: React.FC<FeeNotesListViewProps> = ({
 
   useEffect(() => {
     const loadFeeNotes = () => {
-      fetchFeeNotesFromDatabase(currentUser?.firmId).then(setFeeNotesList).catch(() => {
-        setFeeNotesList(getFeeNotes());
-      });
+      if (!currentUser?.firmId) {
+        setFeeNotesList([]);
+        setErrorMessage('Sign in to view fee notes for your firm.');
+        return;
+      }
+
+      fetchFeeNotesFromDatabase(currentUser.firmId)
+        .then(notes => {
+          setFeeNotesList(notes);
+          setErrorMessage('');
+        })
+        .catch(() => {
+          setFeeNotesList([]);
+          setErrorMessage('We could not load fee notes. Check your connection and try again.');
+        });
     };
     loadFeeNotes();
 
@@ -152,6 +164,16 @@ export const FeeNotesListView: React.FC<FeeNotesListViewProps> = ({
     };
   }, [currentUser?.firmId]);
 
+  useEffect(() => {
+    const targetId = sessionStorage.getItem('OPEN_FEE_NOTE_ID');
+    if (!targetId || feeNotesList.length === 0) return;
+    const note = feeNotesList.find(item => item.id === targetId);
+    if (note) {
+      setSelectedLegalNote(note);
+      sessionStorage.removeItem('OPEN_FEE_NOTE_ID');
+    }
+  }, [feeNotesList]);
+
   // When dispatching, auto-fill client's phone and email if found
   useEffect(() => {
     if (!dispatchNote) return;
@@ -175,22 +197,17 @@ export const FeeNotesListView: React.FC<FeeNotesListViewProps> = ({
       return;
     }
 
-    // 1. Update local state
-    const updated = feeNotesList.filter(fn => fn.id !== id);
-    setFeeNotesList(updated);
-    setSelectedIds(prev => prev.filter(item => item !== id));
-    if (selectedLegalNote?.id === id) setSelectedLegalNote(null);
-
-    // 2. Persist to LocalStorage
-    persistFeeNotes(updated);
-
-    // 3. Delete from Authoritative Server Database & Supabase
     try {
-      await deleteFeeNoteFromDatabase(id);
+      if (!currentUser?.firmId) throw new Error('Your firm account could not be verified. Sign out and sign in again.');
+      await deleteFeeNoteFromDatabase(currentUser.firmId, id);
+      const updated = feeNotesList.filter(fn => fn.id !== id);
+      setFeeNotesList(updated);
+      setSelectedIds(prev => prev.filter(item => item !== id));
+      if (selectedLegalNote?.id === id) setSelectedLegalNote(null);
+      persistFeeNotes(updated);
       showToast(`Fee Note "${billNumber}" deleted successfully.`);
     } catch (error: any) {
-      console.warn('Database deletion note:', error);
-      showToast(`Fee Note "${billNumber}" removed from ledger.`);
+      setErrorMessage(error.message || `We could not delete fee note "${billNumber}".`);
     }
   };
 
@@ -460,6 +477,28 @@ Kindly contact our registry for any inquiries.`;
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // Bulk Database Deletion
+  const handleBulkDeleteFeeNotes = async () => {
+    if (selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    if (!window.confirm(`Are you sure you want to permanently delete ${count} selected fee note${count > 1 ? 's' : ''} from the database? This action cannot be undone.`)) {
+      return;
+    }
+    const targetIds = [...selectedIds];
+    try {
+      if (!currentUser?.firmId) throw new Error('Your firm account could not be verified. Sign out and sign in again.');
+      for (const id of targetIds) {
+        await deleteFeeNoteFromDatabase(currentUser.firmId, id);
+      }
+      const updated = await fetchFeeNotesFromDatabase(currentUser.firmId);
+      setFeeNotesList(updated);
+      setSelectedIds([]);
+      showToast(`Deleted ${count} fee note${count > 1 ? 's' : ''}.`);
+    } catch (error: any) {
+      setErrorMessage(error.message || 'We could not delete the selected fee notes. Please refresh and try again.');
+    }
   };
 
   // Master Excel Export
@@ -891,15 +930,31 @@ Kindly contact our registry for any inquiries.`;
         </div>
       </div>
 
-      {/* FLOATING BULK EXPORT BAR */}
+      {/* FLOATING BULK BAR */}
       {selectedIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-5 py-2.5 rounded-2xl shadow-xl flex items-center gap-4 text-xs font-semibold">
-          <span>{selectedIds.length} Selected</span>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-5 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-4">
+          <span className="font-mono">{selectedIds.length} of {filteredFeeNotes.length} Selected</span>
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="px-2 py-0.5 rounded bg-slate-800 dark:bg-zinc-200 text-slate-200 dark:text-zinc-800 text-[10px] font-semibold hover:opacity-80 cursor-pointer"
+          >
+            {selectedIds.length === filteredFeeNotes.length ? 'Deselect All' : `Select All (${filteredFeeNotes.length})`}
+          </button>
           <div className="h-4 w-px bg-slate-700 dark:bg-zinc-300" />
           <button onClick={handleExportConsolidatedExcel} className="flex items-center gap-1.5 hover:underline cursor-pointer">
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Export Excel Ledger
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Export Excel
           </button>
-          <button onClick={() => setSelectedIds([])} className="hover:text-red-400 cursor-pointer">
+          <div className="h-4 w-px bg-slate-700 dark:bg-zinc-300" />
+          <button
+            type="button"
+            onClick={handleBulkDeleteFeeNotes}
+            className="flex items-center gap-1.5 text-rose-400 hover:text-rose-300 cursor-pointer font-bold px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 transition-colors"
+            title="Permanently delete all selected fee notes from database"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" /> Delete ({selectedIds.length})
+          </button>
+          <button onClick={() => setSelectedIds([])} className="hover:text-red-400 cursor-pointer p-0.5" title="Clear selection">
             <X className="w-4 h-4" />
           </button>
         </div>

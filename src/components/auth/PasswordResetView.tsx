@@ -8,7 +8,6 @@ interface PasswordResetViewProps {
 
 export const PasswordResetView: React.FC<PasswordResetViewProps> = ({ onBackToLogin }) => {
   const [email, setEmail] = useState('');
-  const [token, setToken] = useState('');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -17,60 +16,87 @@ export const PasswordResetView: React.FC<PasswordResetViewProps> = ({ onBackToLo
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isPreFilledEmail, setIsPreFilledEmail] = useState(false);
+  const [isRecoveryReady, setIsRecoveryReady] = useState(false);
+  const [isCheckingRecovery, setIsCheckingRecovery] = useState(true);
 
   useEffect(() => {
-    // 1. Check if Supabase session is established from recovery link
-    supabase.auth.getSession().then(({ data }) => {
-      if (data?.session?.user?.email) {
-        setEmail(data.session.user.email);
-        setIsPreFilledEmail(true);
-      }
-    });
-
-    supabase.auth.getUser().then(({ data }) => {
-      if (data?.user?.email) {
-        setEmail(data.user.email);
-        setIsPreFilledEmail(true);
-      }
-    });
-
+    let active = true;
+    let recoveryEventReceived = false;
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY' || session?.user) {
-        if (session?.user?.email) {
+      if (event === 'PASSWORD_RECOVERY' && session?.user?.email) {
+        recoveryEventReceived = true;
+        setEmail(session.user.email);
+        setIsPreFilledEmail(true);
+        setIsRecoveryReady(true);
+        setError('');
+      }
+    });
+
+    const initializeRecovery = async () => {
+      try {
+        const query = new URLSearchParams(window.location.search);
+        const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        const returnedError = query.get('error_description') || hash.get('error_description');
+        if (returnedError) throw new Error(returnedError.replace(/\+/g, ' '));
+
+        let recoveryLink = query.get('type') === 'recovery' || hash.get('type') === 'recovery';
+        let session = null;
+        const code = query.get('code');
+        if (code) {
+          recoveryLink = true;
+          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) throw exchangeError;
+          session = data.session;
+        } else {
+          const tokenHash = query.get('token_hash');
+          if (tokenHash && query.get('type') === 'recovery') {
+            recoveryLink = true;
+            const { data, error: verifyError } = await supabase.auth.verifyOtp({
+              token_hash: tokenHash,
+              type: 'recovery',
+            });
+            if (verifyError) throw verifyError;
+            session = data.session;
+          } else {
+            const accessToken = hash.get('access_token');
+            const refreshToken = hash.get('refresh_token');
+            if (accessToken && refreshToken) {
+              recoveryLink = recoveryLink || hash.get('type') === 'recovery';
+              const { data, error: sessionError } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              });
+              if (sessionError) throw sessionError;
+              session = data.session;
+            }
+          }
+        }
+
+        if (!session) {
+          const { data, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) throw sessionError;
+          session = data.session;
+        }
+
+        if (!active) return;
+        if (session?.user?.email && (recoveryLink || recoveryEventReceived)) {
           setEmail(session.user.email);
           setIsPreFilledEmail(true);
+          setIsRecoveryReady(true);
+        } else {
+          throw new Error('This password reset link is invalid or expired. Request a new reset link from the sign-in page.');
         }
+      } catch (recoveryError: any) {
+        if (active) setError(recoveryError?.message || 'Could not verify the password reset link. Request a new one and try again.');
+      } finally {
+        if (active) setIsCheckingRecovery(false);
       }
-    });
+    };
 
-    // 2. Parse query params or hash from URL
-    try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlEmail = urlParams.get('email');
-      const urlToken = urlParams.get('token');
-      const code = urlParams.get('code');
-      if (urlEmail) {
-        setEmail(urlEmail);
-        setIsPreFilledEmail(true);
-      }
-      if (urlToken) setToken(urlToken);
-      if (code) {
-        supabase.auth.exchangeCodeForSession(code).then(({ data }) => {
-          if (data?.session?.user?.email) {
-            setEmail(data.session.user.email);
-            setIsPreFilledEmail(true);
-          }
-        }).catch(() => {});
-      }
-
-      if (window.location.hash) {
-        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-        const hashToken = hashParams.get('access_token');
-        if (hashToken) setToken(hashToken);
-      }
-    } catch (e) {}
+    void initializeRecovery();
 
     return () => {
+      active = false;
       authListener?.subscription?.unsubscribe();
     };
   }, []);
@@ -89,74 +115,21 @@ export const PasswordResetView: React.FC<PasswordResetViewProps> = ({ onBackToLo
       return;
     }
 
-    const targetEmail = email.trim().toLowerCase();
-    if (!targetEmail) {
-      setError('Please enter your account email address.');
+    if (!isRecoveryReady) {
+      setError('Open the password reset link from your email before choosing a new password.');
       return;
     }
 
     setIsSaving(true);
 
     try {
-      const productionAppUrl = 'https://nyagahkithinji-advocates.azurewebsites.net';
-      let supabaseUpdated = false;
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) throw updateError;
 
-      // 1. Supabase Auth update (The official Supabase way when arriving from recovery session)
-      try {
-        const { error: authErr } = await supabase.auth.updateUser({ password });
-        if (!authErr) {
-          supabaseUpdated = true;
-        } else if (!token) {
-          throw new Error(authErr.message);
-        }
-      } catch (supaErr: any) {
-        if (!token) throw supaErr;
-      }
-
-      // 2. Direct Supabase public.users table update
-      try {
-        await supabase
-          .from('users')
-          .update({ password_hash: password })
-          .ilike('email', targetEmail);
-      } catch (dbErr) {}
-
-      // 3. Dispatch confirmation & update via backend engine (Admin API updates Supabase Auth if session wasn't active)
-      let backendUpdated = false;
-      try {
-        const res = await fetch('/api/v1/email/confirm-password-reset', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: targetEmail,
-            new_password: password,
-            token: token || undefined,
-            portal_url: productionAppUrl,
-          }),
-        });
-        if (res.ok) backendUpdated = true;
-      } catch (_) {}
-
-      if (!supabaseUpdated && !backendUpdated && !token) {
-        throw new Error('Recovery session expired. Please request a new password reset link.');
-      }
-
-      // 4. Update local roster cache if present
-      try {
-        const stored = localStorage.getItem('EXACT_USERS');
-        if (stored) {
-          const list = JSON.parse(stored);
-          const idx = list.findIndex((u: any) => (u.workEmail || '').toLowerCase() === targetEmail);
-          if (idx !== -1) {
-            list[idx].passwordHash = password;
-            localStorage.setItem('EXACT_USERS', JSON.stringify(list));
-          }
-        }
-      } catch (lsErr) {}
-
-      setMessage('Your password has been successfully updated in Supabase. You can now log into your account.');
+      window.history.replaceState(null, '', window.location.pathname);
+      setMessage(`Password updated for ${email}. You can now sign in with your new password.`);
     } catch (err: any) {
-      setError(err?.message || 'Failed to update password. Please check your connection or contact Support.');
+      setError(err?.message || 'Could not update your password. Request a new reset link and try again.');
     } finally {
       setIsSaving(false);
     }
@@ -299,10 +272,15 @@ export const PasswordResetView: React.FC<PasswordResetViewProps> = ({ onBackToLo
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={isSaving}
-                className="w-full py-3 text-xs font-bold uppercase tracking-wider rounded-full transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-[0.98] border backdrop-blur-md bg-slate-900/90 hover:bg-slate-900 text-white border-slate-700/50 shadow-slate-900/25 dark:bg-white/10 dark:hover:bg-white/15 dark:text-white dark:border-white/20"
+                disabled={isSaving || isCheckingRecovery || !isRecoveryReady}
+                className="w-full py-3 text-xs font-bold uppercase tracking-wider rounded-full transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-[0.98] border backdrop-blur-md bg-slate-900/90 hover:bg-slate-900 text-white border-slate-700/50 shadow-slate-900/25 dark:bg-white/10 dark:hover:bg-white/15 dark:text-white dark:border-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSaving ? (
+                {isCheckingRecovery ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                    <span>Verifying Reset Link...</span>
+                  </>
+                ) : isSaving ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
                     <span>Saving Password...</span>

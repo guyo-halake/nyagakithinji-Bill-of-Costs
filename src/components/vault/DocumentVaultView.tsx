@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ExactVaultFileRecord, SystemUser } from '../../services/supabase';
+import { ExactVaultFileRecord, SystemUser, getVaultFiles } from '../../services/supabase';
 import { createDocumentDownloadUrl, deleteDocument, fetchDocuments, uploadDocument } from '../../services/data';
 import { hasPermission } from '../../services/rbac';
 import {
@@ -25,7 +25,9 @@ import {
   CheckCircle2,
   Building2,
   Briefcase,
-  Calculator
+  Calculator,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 
 interface DocumentVaultViewProps {
@@ -37,7 +39,8 @@ export const DocumentVaultView: React.FC<DocumentVaultViewProps> = ({ currentUse
   const [filterCategory, setFilterCategory] = useState<'all' | 'pdfs' | 'excels' | 'multimedia'>('all');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'size'>('date');
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
-  const [fileList, setFileList] = useState<ExactVaultFileRecord[]>([]);
+  const [fileList, setFileList] = useState<ExactVaultFileRecord[]>(() => getVaultFiles());
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
   const [, setPermissionTick] = useState(0);
 
@@ -62,15 +65,22 @@ export const DocumentVaultView: React.FC<DocumentVaultViewProps> = ({ currentUse
   }, []);
 
   useEffect(() => {
-    if (!currentUser?.firmId) return;
-    const loadDocuments = () => fetchDocuments(currentUser.firmId!).then(setFileList).catch(error => setErrorMessage(error.message || 'Unable to load documents.'));
+    const firmId = currentUser?.firmId || 'firm-001';
+    const loadDocuments = () => fetchDocuments(firmId).then(docs => {
+      if (docs && docs.length > 0) setFileList(docs);
+      else setFileList(getVaultFiles());
+    }).catch(() => setFileList(getVaultFiles()));
     void loadDocuments();
     const handleRealtime = (event: Event) => {
       const detail = (event as CustomEvent<{ table?: string }>).detail;
       if (detail?.table === 'documents') void loadDocuments();
     };
     window.addEventListener('databaseRealtimeUpdate', handleRealtime);
-    return () => window.removeEventListener('databaseRealtimeUpdate', handleRealtime);
+    window.addEventListener('documentsUpdated', () => void loadDocuments());
+    return () => {
+      window.removeEventListener('databaseRealtimeUpdate', handleRealtime);
+      window.removeEventListener('documentsUpdated', () => {});
+    };
   }, [currentUser?.firmId]);
 
   // File Upload Handler (Connected to Supabase Storage state)
@@ -135,15 +145,48 @@ export const DocumentVaultView: React.FC<DocumentVaultViewProps> = ({ currentUse
 
   const handleDelete = async (f: ExactVaultFileRecord) => {
     if (confirm(`Are you sure you want to delete "${f.filename}" from Supabase storage?`)) {
-      if (!currentUser?.firmId) return;
+      const firmId = currentUser?.firmId || 'firm-001';
       try {
-        await deleteDocument(currentUser.firmId, f.id, f.path);
+        await deleteDocument(firmId, f.id, f.path);
         setFileList(prev => prev.filter(item => item.id !== f.id));
+        setSelectedFileIds(prev => prev.filter(id => id !== f.id));
       } catch (error: any) {
         setErrorMessage(error.message || `Unable to delete ${f.filename}.`);
       }
     }
     setActiveMenuId(null);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedFileIds.length === filtered.length) {
+      setSelectedFileIds([]);
+    } else {
+      setSelectedFileIds(filtered.map(f => f.id));
+    }
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedFileIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const handleBulkDeleteDocuments = async () => {
+    if (selectedFileIds.length === 0) return;
+    const count = selectedFileIds.length;
+    if (!window.confirm(`Are you sure you want to permanently delete ${count} selected document${count > 1 ? 's' : ''}? This will remove them from storage and the database.`)) {
+      return;
+    }
+    const firmId = currentUser?.firmId || 'firm-001';
+    const targetIds = [...selectedFileIds];
+    try {
+      for (const id of targetIds) {
+        const file = fileList.find(f => f.id === id);
+        await deleteDocument(firmId, id, file?.path);
+      }
+      setFileList(prev => prev.filter(f => !targetIds.includes(f.id)));
+      setSelectedFileIds([]);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Batch document delete failed.');
+    }
   };
 
   const getFileIcon = (file: ExactVaultFileRecord) => {
@@ -270,35 +313,55 @@ export const DocumentVaultView: React.FC<DocumentVaultViewProps> = ({ currentUse
       {/* CARD VIEW MODE */}
       {viewMode === 'card' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((f: ExactVaultFileRecord) => (
-            <div
-              key={f.id}
-              onClick={() => {
-                if (can('vault.preview')) handleOpenFile(f);
-              }}
-              className={`vercel-card-interactive p-5 space-y-4 flex flex-col justify-between relative group min-w-0 ${!can('vault.preview') ? 'cursor-default' : 'cursor-pointer'}`}
-            >
-              <div className="flex items-start gap-3 min-w-0">
-                {getFileIcon(f)}
-                <div className="min-w-0 flex-1 space-y-1">
-                  <h3 className="font-bold text-xs text-[var(--text-main)] truncate leading-snug">
-                    {f.filename}
-                  </h3>
-                  <p className="text-[10.5px] text-[var(--text-muted)] font-mono truncate">
-                    {f.client}
-                  </p>
-                  <p className="text-[10px] text-[var(--text-muted)] truncate">
-                    {f.matter}
-                  </p>
+          {filtered.map((f: ExactVaultFileRecord) => {
+            const isSelected = selectedFileIds.includes(f.id);
+            return (
+              <div
+                key={f.id}
+                onClick={() => {
+                  if (can('vault.preview')) handleOpenFile(f);
+                }}
+                className={`vercel-card-interactive p-5 space-y-4 flex flex-col justify-between relative group min-w-0 ${
+                  isSelected ? 'border-slate-900 dark:border-white ring-1 ring-slate-900 dark:ring-white bg-slate-50/50 dark:bg-zinc-800/50' : ''
+                } ${!can('vault.preview') ? 'cursor-default' : 'cursor-pointer'}`}
+              >
+                <div className="flex items-start gap-3 min-w-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSelectOne(f.id);
+                    }}
+                    className="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)] mt-0.5"
+                    title={isSelected ? 'Deselect' : 'Select'}
+                  >
+                    {isSelected ? (
+                      <CheckSquare className="w-4 h-4 text-slate-900 dark:text-white" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                  </button>
+                  {getFileIcon(f)}
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <h3 className="font-bold text-xs text-[var(--text-main)] truncate leading-snug">
+                      {f.filename}
+                    </h3>
+                    <p className="text-[10.5px] text-[var(--text-muted)] font-mono truncate">
+                      {f.client}
+                    </p>
+                    <p className="text-[10px] text-[var(--text-muted)] truncate">
+                      {f.matter}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-[var(--border-color)] flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-[var(--text-muted)]">{f.size} &bull; {f.updatedAt}</span>
+                  {can('vault.preview') && <span className="font-bold text-[var(--text-main)] group-hover:underline">Preview & Metrics →</span>}
                 </div>
               </div>
-
-              <div className="pt-3 border-t border-[var(--border-color)] flex items-center justify-between text-[11px] font-mono">
-                <span className="text-[var(--text-muted)]">{f.size} &bull; {f.updatedAt}</span>
-                {can('vault.preview') && <span className="font-bold text-[var(--text-main)] group-hover:underline">Preview & Metrics →</span>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -309,6 +372,20 @@ export const DocumentVaultView: React.FC<DocumentVaultViewProps> = ({ currentUse
             <table className="w-full text-left text-xs text-[var(--text-main)]">
               <thead className="bg-[var(--bg-subtle)] text-[var(--text-muted)] uppercase text-[10px] tracking-wider border-b border-[var(--border-color)] font-semibold">
                 <tr>
+                  <th className="px-3 py-3.5 w-10 text-center">
+                    <button
+                      type="button"
+                      onClick={toggleSelectAll}
+                      className="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      title={selectedFileIds.length === filtered.length ? 'Deselect All' : 'Select All'}
+                    >
+                      {selectedFileIds.length === filtered.length && filtered.length > 0 ? (
+                        <CheckSquare className="w-4 h-4 text-slate-900 dark:text-white" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  </th>
                   <th className="px-4 py-3.5">Filename & Type</th>
                   <th className="px-4 py-3.5">Client & Matter</th>
                   <th className="px-4 py-3.5 font-mono">File Size</th>
@@ -317,56 +394,109 @@ export const DocumentVaultView: React.FC<DocumentVaultViewProps> = ({ currentUse
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border-color)]">
-                {filtered.map((f: ExactVaultFileRecord) => (
-                  <tr 
-                    key={f.id} 
-                    className={`hover:bg-[var(--bg-subtle)] transition-colors ${can('vault.preview') ? 'cursor-pointer' : 'cursor-default'}`} 
-                    onClick={() => {
-                      if (can('vault.preview')) handleOpenFile(f);
-                    }}
-                  >
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        {getFileIcon(f)}
-                        <div>
-                          <strong className="font-bold text-[var(--text-main)] block">{f.filename}</strong>
-                          <span className="text-[10.5px] text-[var(--text-muted)] font-mono">{f.fileType}</span>
+                {filtered.map((f: ExactVaultFileRecord) => {
+                  const isSelected = selectedFileIds.includes(f.id);
+                  return (
+                    <tr
+                      key={f.id}
+                      className={`hover:bg-[var(--bg-subtle)] transition-colors ${
+                        isSelected ? 'bg-slate-100/60 dark:bg-zinc-800/40' : ''
+                      } ${can('vault.preview') ? 'cursor-pointer' : 'cursor-default'}`}
+                      onClick={() => {
+                        if (can('vault.preview')) handleOpenFile(f);
+                      }}
+                    >
+                      <td className="px-3 py-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSelectOne(f.id)}
+                          className="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-slate-900 dark:text-white" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          {getFileIcon(f)}
+                          <div>
+                            <strong className="font-bold text-[var(--text-main)] block">{f.filename}</strong>
+                            <span className="text-[10.5px] text-[var(--text-muted)] font-mono">{f.fileType}</span>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 max-w-xs">
-                      <strong className="text-[var(--text-main)] block truncate">{f.client}</strong>
-                      <span className="text-[10.5px] text-[var(--text-muted)] truncate block">{f.matter}</span>
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[11px] text-[var(--text-muted)]">{f.size}</td>
-                    <td className="px-4 py-3.5 font-mono text-[11px] text-[var(--text-muted)]">{f.updatedAt}</td>
-                    <td className="px-4 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        {can('vault.preview') && (
-                          <button
-                            onClick={() => handleOpenFile(f)}
-                            className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] cursor-pointer"
-                            title="Preview Metrics"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {can('vault.download') && (
-                          <button
-                            onClick={() => handleDownload(f)}
-                            className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] cursor-pointer"
-                            title="Download"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3.5 max-w-xs">
+                        <strong className="text-[var(--text-main)] block truncate">{f.client}</strong>
+                        <span className="text-[10.5px] text-[var(--text-muted)] truncate block">{f.matter}</span>
+                      </td>
+                      <td className="px-4 py-3.5 font-mono text-[11px] text-[var(--text-muted)]">{f.size}</td>
+                      <td className="px-4 py-3.5 font-mono text-[11px] text-[var(--text-muted)]">{f.updatedAt}</td>
+                      <td className="px-4 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {can('vault.preview') && (
+                            <button
+                              onClick={() => handleOpenFile(f)}
+                              className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] cursor-pointer"
+                              title="Preview Metrics"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {can('vault.download') && (
+                            <button
+                              onClick={() => handleDownload(f)}
+                              className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] cursor-pointer"
+                              title="Download"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {can('vault.delete') && (
+                            <button
+                              onClick={() => handleDelete(f)}
+                              className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-rose-600 hover:bg-rose-500/10 cursor-pointer"
+                              title="Delete Document"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* FLOATING BULK BAR */}
+      {selectedFileIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-5 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-4">
+          <span className="font-mono">{selectedFileIds.length} of {filtered.length} Selected</span>
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="px-2 py-0.5 rounded bg-slate-800 dark:bg-zinc-200 text-slate-200 dark:text-zinc-800 text-[10px] font-semibold hover:opacity-80 cursor-pointer"
+          >
+            {selectedFileIds.length === filtered.length ? 'Deselect All' : `Select All (${filtered.length})`}
+          </button>
+          <div className="h-4 w-px bg-slate-700 dark:bg-zinc-300" />
+          <button
+            type="button"
+            onClick={handleBulkDeleteDocuments}
+            className="flex items-center gap-1.5 text-rose-400 hover:text-rose-300 cursor-pointer font-bold px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 transition-colors"
+            title="Permanently delete all selected documents"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" /> Delete ({selectedFileIds.length})
+          </button>
+          <button onClick={() => setSelectedFileIds([])} className="hover:text-red-400 cursor-pointer p-0.5" title="Clear selection">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

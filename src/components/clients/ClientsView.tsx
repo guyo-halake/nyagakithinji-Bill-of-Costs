@@ -113,19 +113,33 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!currentUser?.firmId) return;
-    const loadClients = () =>
-      fetchClients(currentUser.firmId!)
-        .then(setClientsList)
-        .catch(error => setErrorMessage(error.message || 'Unable to load clients.'));
+    const loadClients = () => {
+      if (!currentUser?.firmId) {
+        setClientsList([]);
+        setErrorMessage('Sign in to view clients for your firm.');
+        return;
+      }
+
+      fetchClients(currentUser.firmId)
+        .then(clients => {
+          setClientsList(clients);
+          setErrorMessage('');
+        })
+        .catch(() => {
+          setClientsList([]);
+          setErrorMessage('We could not load client records. Check your connection and try again.');
+        });
+    };
 
     const loadFeeNotes = () => {
-      fetchFeeNotesFromDatabase(currentUser.firmId!)
-        .then((notes: ExactFeeNoteRecord[]) => {
-          if (notes && notes.length > 0) setFeeNotesList(notes);
-          else setFeeNotesList(getFeeNotes());
-        })
-        .catch(() => setFeeNotesList(getFeeNotes()));
+      if (!currentUser?.firmId) {
+        setFeeNotesList([]);
+        return;
+      }
+
+      fetchFeeNotesFromDatabase(currentUser.firmId)
+        .then(setFeeNotesList)
+        .catch(() => setFeeNotesList([]));
     };
 
     void loadClients();
@@ -143,20 +157,39 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         void loadClients();
       }
     };
+    const handleStorage = () => {
+      void loadClients();
+      void loadFeeNotes();
+    };
     window.addEventListener('databaseRealtimeUpdate', handleRealtime);
     window.addEventListener('clientsUpdated', handleClientsUpdated);
     window.addEventListener('feeNotesUpdated', loadFeeNotes);
-    window.addEventListener('storage', () => {
-      void loadClients();
-      void loadFeeNotes();
-    });
+    window.addEventListener('storage', handleStorage);
     return () => {
       window.removeEventListener('databaseRealtimeUpdate', handleRealtime);
       window.removeEventListener('clientsUpdated', handleClientsUpdated);
       window.removeEventListener('feeNotesUpdated', loadFeeNotes);
-      window.removeEventListener('storage', () => {});
+      window.removeEventListener('storage', handleStorage);
     };
   }, [currentUser?.firmId]);
+
+  // Deep-link opener from Dashboard "View Briefs"
+  useEffect(() => {
+    const targetId = sessionStorage.getItem('OPEN_CLIENT_ID');
+    const targetName = sessionStorage.getItem('OPEN_CLIENT_NAME');
+    if ((targetId || targetName) && clientsList.length > 0) {
+      const found = clientsList.find(c =>
+        (targetId && c.id === targetId) ||
+        (targetName && c.name.toLowerCase().trim() === targetName.toLowerCase().trim()) ||
+        (targetName && (c.company || '').toLowerCase().trim() === targetName.toLowerCase().trim())
+      );
+      if (found) {
+        setSelectedDossierClient(found);
+        sessionStorage.removeItem('OPEN_CLIENT_ID');
+        sessionStorage.removeItem('OPEN_CLIENT_NAME');
+      }
+    }
+  }, [clientsList]);
 
   // Find fee notes for a given client
   const getClientFeeNotes = (client: ExactClientRecord) => {
@@ -198,9 +231,13 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const handleRegisterClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
-    if (!currentUser?.firmId) return;
+    if (!currentUser?.firmId) {
+      setErrorMessage('Sign in to save this client to your firm.');
+      return;
+    }
 
     try {
+      setErrorMessage('');
       const newRecord = await createClient(currentUser.firmId, {
         name: newName.trim(),
         company: newCompany.trim() || newName.trim(),
@@ -775,7 +812,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       {/* SECURE CLIENT PORTAL MAGIC LINK MODAL */}
       {portalModalClient && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl text-xs">
+          <div className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl p-5 sm:p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto space-y-4 shadow-2xl text-xs">
             <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
               <div>
                 <h3 className="font-brand font-bold text-sm text-[var(--text-main)] flex items-center gap-2">
@@ -886,7 +923,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   required
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. Seyani Brothers & Co. (K) Limited"
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
                 />
               </div>
@@ -921,7 +957,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     type="text"
                     value={newCompany}
                     onChange={(e) => setNewCompany(e.target.value)}
-                    placeholder="e.g. Seyani Brothers Ltd"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -934,7 +969,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     type="text"
                     value={newKraPin}
                     onChange={(e) => setNewKraPin(e.target.value)}
-                    placeholder="e.g. P051234567Z"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono uppercase focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -965,7 +999,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     type="text"
                     value={newAddress}
                     onChange={(e) => setNewAddress(e.target.value)}
-                    placeholder="e.g. Upper Hill, Nairobi"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -979,7 +1012,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   type="email"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder="legal@seyani.co.ke"
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono focus:outline-none focus:border-slate-400"
                 />
               </div>
@@ -993,7 +1025,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     type="text"
                     value={newPhonePrimary}
                     onChange={(e) => setNewPhonePrimary(e.target.value)}
-                    placeholder="+254 700 000 000"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -1006,7 +1037,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     type="text"
                     value={newPhoneSecondary}
                     onChange={(e) => setNewPhoneSecondary(e.target.value)}
-                    placeholder="+254 20 000 0000"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-main)] font-mono focus:outline-none focus:border-slate-400"
                   />
                 </div>

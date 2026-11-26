@@ -10,26 +10,43 @@ import {
   UserCheck, HelpCircle, Code, Play, CheckSquare, BarChart3, TrendingUp, Filter, Hash, UserPlus,
   Kanban, MoveRight, ArrowLeftRight, CheckCheck, Github, Laptop, Smartphone, BookOpen, Video, Calendar,
   FileCode, PlayCircle, FolderArchive, Wifi, RefreshCcw, Sun, Satellite, Printer, Receipt, MessageCircle,
-  Battery, BatteryCharging, Cloud, ArrowLeft, Award, Check, Scale
+  Battery, BatteryCharging, Cloud, ArrowLeft, Award, Check, Scale, FileSpreadsheet, Upload
 } from 'lucide-react';
-import { supabase, SystemUser, EXACT_FIRM_INFO, getFeeNotes, persistFeeNotes, ExactFeeNoteRecord, EXACT_MATTERS, EXACT_CLIENTS, EXACT_VAULT_FILES } from '../../services/supabase';
+import { 
+  FiBookOpen, 
+  FiFolder, 
+  FiUsers, 
+  FiDollarSign, 
+  FiCheckSquare 
+} from 'react-icons/fi';
+import { supabase, SystemUser, EXACT_FIRM_INFO, getFeeNotes, persistFeeNotes, ExactFeeNoteRecord, ExactMatterRecord, ExactClientRecord, EXACT_MATTERS, EXACT_CLIENTS, EXACT_VAULT_FILES, fetchFeeNotesFromDatabase } from '../../services/supabase';
 import { getLocalTemplates, assignRoleToUser, RoleTemplate } from '../../services/rbac';
 import { getActivityLogs, logSystemActivity, ActivityLogItem } from '../../services/activityLogger';
-import { fetchFirmUsers, createFirmUser, updateFirmUser, deleteFirmUser } from '../../services/data';
+import { fetchFirmUsers, createFirmUser, createFirmLogin, updateFirmUser, deleteFirmUser, fetchClients, fetchMatters } from '../../services/data';
 import { AdminServerView } from './AdminServerView';
 import { AdminAiInfraView } from './AdminAiInfraView';
 import { AdminFinanceView } from './AdminFinanceView';
 import { AdminClientCrmView } from './AdminClientCrmView';
 import { AdminOperationsLogView } from './AdminOperationsLogView';
 import { AdminKeyboardShortcutsModal } from './AdminKeyboardShortcutsModal';
+import { DarajaListenerCard } from './DarajaListenerCard';
+import { MarsabitPowerView } from './MarsabitPowerView';
+import { AdminMessagesHubView } from './AdminMessagesHubView';
+import { AdminSupportDeskView } from './AdminSupportDeskView';
+import { AdminBillsOfCostsStudioView } from './AdminBillsOfCostsStudioView';
+import { AdminAiLegalAgentsView } from './AdminAiLegalAgentsView';
+import kcaTimetable from '../../data/kca-timetable.json';
 
 type AdminTab = 
   | 'dashboard'
   | 'karani_erp'
+  | 'bills_studio'
+  | 'legal_ai_agents'
   | 'projects_clients'
   | 'client_crm'
   | 'finance_billing'
   | 'server'
+  | 'marsabit_power'
   | 'ai_infra'
   | 'career_education'
   | 'operations_log'
@@ -108,8 +125,8 @@ interface KcaCourse {
   status: 'Completed' | 'In Progress' | 'Upcoming';
 }
 
-export const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+export const AdminDashboard: React.FC<{ currentUser: SystemUser }> = ({ currentUser }) => {
+  const [activeTab, setActiveTabState] = useState<AdminTab>('dashboard');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Live Uptime
@@ -168,31 +185,71 @@ export const AdminDashboard: React.FC = () => {
     return () => clearInterval(netTimer);
   }, []);
 
-  // 2. Station Batteries: Drops slowly from 80% to 32% (warning threshold), then auto-charges back up
-  const [batteryLevel, setBatteryLevel] = useState(79.4);
-  const [isBatteryCharging, setIsBatteryCharging] = useState(false);
-  useEffect(() => {
-    const battTimer = setInterval(() => {
-      setBatteryLevel(prev => {
-        if (!isBatteryCharging) {
-          const next = prev - 0.05;
-          if (next <= 32.0) {
-            setIsBatteryCharging(true);
-            return 32.0;
-          }
-          return Number(next.toFixed(2));
-        } else {
-          const next = prev + 0.15;
-          if (next >= 82.0) {
-            setIsBatteryCharging(false);
-            return 82.0;
-          }
-          return Number(next.toFixed(2));
-        }
+  // Top Bar Search Query
+  const [topSearchQuery, setTopSearchQuery] = useState('');
+
+  const getTodaySchedule = () => {
+    const timeZone = kcaTimetable.timezone;
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(new Date());
+    const part = (type: string) => dateParts.find(item => item.type === type)?.value ?? '';
+    const today = `${part('year')}-${part('month')}-${part('day')}`;
+    const weekdayFor = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', {
+      weekday: 'long',
+      timeZone: 'UTC'
+    });
+    const classesFor = (date: string) => kcaTimetable.classes
+      .flatMap(course => course.day === weekdayFor(date)
+        ? course.time_slots
+          .filter(slot => slot.from <= date && slot.to >= date)
+          .map(slot => ({ course, slot }))
+        : [])
+      .sort((a, b) => a.slot.start.localeCompare(b.slot.start));
+    const dateLabel = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'UTC'
+    });
+    const timeLabel = (time: string) => {
+      const [hours, minutes] = time.split(':').map(Number);
+      return new Date(Date.UTC(2026, 0, 1, hours, minutes)).toLocaleTimeString('en-GB', {
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'UTC'
       });
-    }, 4000);
-    return () => clearInterval(battTimer);
-  }, [isBatteryCharging]);
+    };
+
+    let nextClassDate = '';
+    let nextClasses: ReturnType<typeof classesFor> = [];
+    for (let offset = 1; offset <= 45; offset += 1) {
+      const date = new Date(`${today}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + offset);
+      const candidateDate = date.toISOString().slice(0, 10);
+      const classes = classesFor(candidateDate);
+      if (classes.length) {
+        nextClassDate = candidateDate;
+        nextClasses = classes;
+        break;
+      }
+    }
+
+    const upcomingExams = kcaTimetable.exams.filter(exam => exam.date >= today).slice(0, 2);
+    return {
+      today,
+      dayName: weekdayFor(today),
+      dateFormatted: dateLabel(today),
+      todayClasses: classesFor(today),
+      nextClassDate,
+      nextClasses,
+      upcomingExams,
+      dateLabel,
+      timeLabel
+    };
+  };
 
   // Modals & Navigation
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -212,10 +269,11 @@ export const AdminDashboard: React.FC = () => {
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
 
   // INLINE FULL PROJECT WORKSPACE (NO POPUPS)
-  const [activeInlineProject, setActiveInlineProject] = useState<RealProject | null>(null);
+  const [activeInlineProject, setActiveInlineProjectState] = useState<RealProject | null>(null);
   const [projectWorkspaceTab, setProjectWorkspaceTab] = useState<'overview' | 'journey' | 'commits' | 'comms' | 'incidents' | 'data'>('overview');
   const [projectViewMode, setProjectViewMode] = useState<'grid' | 'kanban' | 'map'>('grid');
   const [projectSubFilter, setProjectSubFilter] = useState<'all' | 'client' | 'internal' | 'school' | 'personal' | 'hardware'>('all');
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
   const [isProbingServices, setIsProbingServices] = useState(false);
   const [probeResults, setProbeResults] = useState<{ [key: string]: { status: string; latency: string; ok: boolean } } | null>(null);
   const [thermalCutSimulating, setThermalCutSimulating] = useState(false);
@@ -257,9 +315,17 @@ export const AdminDashboard: React.FC = () => {
   const [showAddRealUserModal, setShowAddRealUserModal] = useState(false);
   const [newUserFullName, setNewUserFullName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'Managing Partner' | 'Senior Associate' | 'Associate' | 'Pupil' | 'Billing Clerk'>('Associate');
-  const [newUserLskNo, setNewUserLskNo] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('Nyagah@2026');
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'Admin' | 'Advocate'>('Advocate');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [isCreatingRealUser, setIsCreatingRealUser] = useState(false);
+  const [erpFeeNotes, setErpFeeNotes] = useState<ExactFeeNoteRecord[]>([]);
+  const [erpMatters, setErpMatters] = useState<ExactMatterRecord[]>([]);
+  const [erpClients, setErpClients] = useState<ExactClientRecord[]>([]);
+  const [isLoadingErpData, setIsLoadingErpData] = useState(false);
+  const [erpDataError, setErpDataError] = useState('');
+  const [selectedErpFeeNote, setSelectedErpFeeNote] = useState<ExactFeeNoteRecord | null>(null);
+  const [billsStudioAction, setBillsStudioAction] = useState<{ type: 'import' | 'export' | 'print'; id: number } | null>(null);
 
   // Real Karani Law Fee Notes Access Policy State
   const [feeNotesScope, setFeeNotesScope] = useState<'all' | 'self'>(() => {
@@ -361,18 +427,75 @@ export const AdminDashboard: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  const restrictedTabs = new Set<AdminTab>([
+    'finance_billing',
+    'comms_messaging',
+    'support_ticketing',
+    'bills_studio',
+    'legal_ai_agents',
+  ]);
+  const setActiveTab = (tab: AdminTab) => {
+    if (restrictedTabs.has(tab)) {
+      showToast("Sorry, you don't have permission to view this.");
+      return;
+    }
+    setActiveTabState(tab);
+  };
+  const setActiveInlineProject = (project: RealProject | null) => {
+    if (project) {
+      showToast("Sorry, you don't have permission to view this.");
+      return;
+    }
+    setActiveInlineProjectState(null);
+  };
+
   const loadRealUsers = async () => {
     try {
-      const users = await fetchFirmUsers((EXACT_FIRM_INFO as any).id || 'firm-001');
+      if (!currentUser.firmId) {
+        throw new Error('Your account is not linked to an active firm.');
+      }
+      const users = await fetchFirmUsers(currentUser.firmId);
       setRealUsers(users);
     } catch (e) {
       console.error('Failed to load firm users:', e);
+      showToast(`Could not load firm users from Supabase: ${e instanceof Error ? e.message : 'Check your connection and permissions.'}`);
+    }
+  };
+
+  const loadErpData = async () => {
+    if (!currentUser.firmId) {
+      setErpDataError('Your account is not linked to an active firm.');
+      return;
+    }
+
+    setIsLoadingErpData(true);
+    setErpDataError('');
+    try {
+      const [notes, matters, clients, users] = await Promise.all([
+        fetchFeeNotesFromDatabase(currentUser.firmId),
+        fetchMatters(currentUser.firmId),
+        fetchClients(currentUser.firmId),
+        fetchFirmUsers(currentUser.firmId),
+      ]);
+      setErpFeeNotes(notes);
+      setErpMatters(matters);
+      setErpClients(clients);
+      setRealUsers(users);
+    } catch (error) {
+      console.error('Could not load firm dashboard records:', error);
+      setErpDataError(error instanceof Error ? error.message : 'Could not load firm records. Please try again.');
+    } finally {
+      setIsLoadingErpData(false);
     }
   };
 
   useEffect(() => {
     loadRealUsers();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'karani_erp') void loadErpData();
+  }, [activeTab, currentUser.firmId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -394,7 +517,7 @@ export const AdminDashboard: React.FC = () => {
   }, []);
 
   // REAL STARTUP FLEET WITH CONTRACTS (IN KES ONLY) AND 2-MONTH RELEASE CYCLE
-  const [projects] = useState<RealProject[]>([
+  const [projects] = useState<RealProject[]>(() => ([
     // ==========================================
     // 1. COMMERCIAL CLIENT PROJECTS (6)
     // ==========================================
@@ -1449,7 +1572,35 @@ export const AdminDashboard: React.FC = () => {
         'Chassis': 'Lian Li O11 Dynamic EVO (Tempered Glass, Dual Chamber)'
       }
     }
-  ]);
+  ] as RealProject[]).filter(project => project.id !== 'prj-gta-cleo'));
+
+  const projectDescriptions: Record<string, string> = {
+    'prj-fresh-fity': 'An offline-ready checkout system for a Ruiru supermarket, with barcode scanning, receipt printing and sales sync.',
+    'prj-sayara-ecom': 'An online beauty shop for browsing products and placing orders, with M-Pesa checkout and delivery options.',
+    'prj-sayara-daemon': 'A background service that keeps the Sayara storefront product prices and stock information up to date.',
+    'prj-suvplanet': 'A vehicle listings site for the Nairobi showroom, with detailed photos and direct WhatsApp enquiries.',
+    'prj-nokras-hotel': 'A hotel website presenting rooms, dining and event spaces, with an online enquiry and quote flow.',
+    'prj-karani-law': 'A law firm workspace for preparing bills of costs, managing matters and keeping client records.',
+    'prj-inner-circle': 'A private portal for fund information and investor updates.',
+    'prj-khaemba-news': 'A publishing site for news articles, editorial work and media content.',
+    'prj-odinbot': 'A private assistant for searching firm material and helping with routine legal work.',
+    'prj-kca-forensics': 'A lab tool for reviewing network traffic and spotting common security issues.',
+    'prj-kca-attendance': 'A QR-based class check-in prototype for recording attendance at KCA.',
+    'prj-zetech-repo': 'A shared library of diploma papers and study materials for Zetech students.',
+    'prj-discrete-math': 'An interactive way to explore graphs and algorithms used in discrete mathematics.',
+    'prj-jellyfin-marsabit': 'A home media library for streaming videos and music over the local network.',
+    'prj-sovereign-bot': 'A monitoring service that alerts Guyo when the server loses power, overheats or drops its network connection.',
+    'prj-hw-razak-server': 'A Marsabit server for hosting projects, storing files and running local services.',
+    'prj-hw-homelab-node': 'A Linux development machine for building and testing software before deployment.',
+    'prj-hw-custom-pc': 'A planned workstation for local computing, software builds and graphics work.',
+  };
+
+  const normalizedProjectSearch = projectSearchQuery.trim().toLowerCase();
+  const visibleProjects = projects.filter(project => {
+    const matchesCategory = projectSubFilter === 'all' || project.projectGroup === projectSubFilter;
+    const searchable = `${project.name} ${project.client} ${project.category} ${project.currentVersion} ${project.status}`.toLowerCase();
+    return matchesCategory && (!normalizedProjectSearch || searchable.includes(normalizedProjectSearch));
+  });
 
   // CLIENTS DIRECTORY
   const [clients] = useState<ClientAccount[]>([
@@ -1639,30 +1790,33 @@ export const AdminDashboard: React.FC = () => {
 
   const handleCreateRealUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserFullName.trim() || !newUserEmail.trim()) {
-      showToast('Please enter full name and email.');
+    if (!currentUser.firmId) {
+      showToast('Your account is not linked to an active firm.');
       return;
     }
 
+    setIsCreatingRealUser(true);
     try {
-      const created = await createFirmUser((EXACT_FIRM_INFO as any).id || 'firm-001', {
+      const created = await createFirmLogin({
         fullName: newUserFullName.trim(),
-        workEmail: newUserEmail.trim(),
-        role: (newUserRole === 'Managing Partner' ? 'Admin' : 'Advocate') as any,
-        position: newUserRole,
-        lskNo: newUserLskNo.trim() || `P105/${Math.floor(10000 + Math.random() * 90000)}/26`,
-        passwordHash: newUserPassword.trim() || 'Nyagah@2026',
-        advocateTitle: newUserFullName.trim()
+        email: newUserEmail.trim(),
+        username: newUserUsername.trim(),
+        password: newUserPassword,
+        role: newUserRole,
       });
 
       setRealUsers(prev => [created, ...prev]);
       setShowAddRealUserModal(false);
       setNewUserFullName('');
       setNewUserEmail('');
-      setNewUserLskNo('');
-      showToast(`User ${created.fullName} saved to database. They can now log in.`);
+      setNewUserUsername('');
+      setNewUserPassword('');
+      showToast(`User ${created.fullName} created. They can now sign in with their email and password.`);
     } catch (err) {
-      showToast('Error creating user. Check database logs.');
+      console.error('Could not create firm sign-in account:', err);
+      showToast(err instanceof Error ? err.message : 'Could not create the user account.');
+    } finally {
+      setIsCreatingRealUser(false);
     }
   };
 
@@ -1679,15 +1833,16 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const navItems: Array<{ id: AdminTab; label: string; icon: any; count?: number; badge?: string }> = [
-    { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutDashboard },
-    { id: 'karani_erp', label: 'Law Practice ERP', icon: Scale, badge: 'Practice' },
-    { id: 'projects_clients', label: 'Matters & Retainers', icon: Briefcase, count: projects.length },
-    { id: 'client_crm', label: 'Client Directory CRM', icon: UserCheck, count: 5 },
-    { id: 'finance_billing', label: 'Revenue & Remittance', icon: DollarSign },
-    { id: 'operations_log', label: 'Audit Trail & Operations', icon: Activity, badge: 'Secured' },
-    { id: 'users_rbac', label: 'Advocates & Permissions', icon: Users, count: realUsers.length || 5 },
-    { id: 'comms_messaging', label: 'Client Correspondence', icon: MessageSquare },
-    { id: 'support_ticketing', label: 'IT & Practice Helpdesk', icon: HelpCircle },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'karani_erp', label: 'Nyaga Law Firm ERP', icon: Scale },
+    { id: 'projects_clients', label: 'Startup Projects', icon: Briefcase, count: projects.length },
+    { id: 'client_crm', label: 'Clients', icon: UserCheck, count: 5 },
+    { id: 'career_education', label: 'School & Education', icon: GraduationCap },
+    { id: 'finance_billing', label: 'Finances', icon: DollarSign },
+    { id: 'marsabit_power', label: 'Marsabit Power', icon: Zap },
+    { id: 'operations_log', label: 'Server Audit Logs', icon: Activity },
+    { id: 'comms_messaging', label: 'Messages', icon: MessageSquare },
+    { id: 'support_ticketing', label: 'Help & Support', icon: HelpCircle },
   ];
 
   return (
@@ -1706,31 +1861,25 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       <aside className="w-64 flex flex-col py-4 px-3 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs z-20 shrink-0">
         
-        <div className="px-2 pb-3.5 mb-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden border border-zinc-200 dark:border-zinc-700 shrink-0">
-              <img 
-                src="/p3l_logo.jpeg" 
-                alt="P3L" 
-                className="w-full h-full object-contain p-0.5"
-                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-zinc-900 dark:text-white leading-tight truncate">
-                P3L Developers
-              </p>
-              <p className="text-[9.5px] text-zinc-400 dark:text-zinc-500 font-mono truncate leading-tight mt-0.5">
-                subsidiary Biftu Construction Co.
-              </p>
-            </div>
-          </div>
-          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" title="System Online"></span>
+        {/* Clean Logo Only (No Card Enclosure, No Background, Only Logo + P3 Developers under it) */}
+        <div className="px-3 pb-3 mb-2 border-b border-zinc-100 dark:border-zinc-800/60 flex flex-col items-start gap-1">
+          <img 
+            src="/p2l_logo_nobg.png" 
+            alt="P3 Developers" 
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = '/p2l_logo.jpeg';
+            }}
+            className="h-16 w-auto object-contain filter drop-shadow-md hover:scale-105 transition-transform"
+          />
+          <span className="text-xs font-bold text-zinc-900 dark:text-white tracking-tight">
+            P3 Developers
+          </span>
         </div>
 
         <div className="flex flex-col gap-1 flex-1 w-full overflow-y-auto pr-1">
           <span className="text-[9.5px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 px-3 py-1 font-mono">
-            Company Pillars
+            Menu
           </span>
           {navItems.map((nav) => {
             const Icon = nav.icon;
@@ -1817,81 +1966,113 @@ export const AdminDashboard: React.FC = () => {
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
         
         {/* Top Floating Command Bar */}
-        <header className="px-8 py-3.5 w-full flex justify-between items-center bg-transparent z-10">
-          <div className="flex items-center gap-5 min-w-0">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden border border-amber-500/30 shadow-xs">
-                <img src="/p3l_logo.jpeg" alt="P3L" className="w-full h-full object-cover" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-xs font-bold tracking-tight text-zinc-900 dark:text-zinc-100 block leading-tight">
-                  P3L Developers
-                </span>
-                <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono block leading-tight truncate">
-                  subsidiary Biftu Construction Company, Marsabit
-                </span>
-              </div>
-            </div>
-
-            <div 
-              onClick={() => setShowCommandPalette(true)}
-              className="relative hidden md:flex items-center w-72 px-3 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 text-xs text-zinc-400 cursor-pointer hover:border-amber-500/40 transition-colors shadow-2xs"
-            >
-              <Search className="w-3.5 h-3.5 mr-2 text-zinc-400" />
-              <span className="truncate">Search projects, clients, courses...</span>
-              <kbd className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-mono bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border border-zinc-200 dark:border-zinc-700">
-                Ctrl+K
-              </kbd>
+        <header className="px-8 py-3.5 w-full flex justify-between items-center bg-transparent z-10 gap-4">
+          <div className="flex items-center gap-4 flex-1 min-w-0">
+            {/* Real Search Input with Auto-Filter */}
+            <div className="relative w-full max-w-sm">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+              <input 
+                type="text"
+                value={topSearchQuery}
+                onChange={(e) => setTopSearchQuery(e.target.value)}
+                placeholder="Search projects, clients..."
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 transition-colors shadow-2xs"
+              />
+              {topSearchQuery.trim() && (
+                <div className="absolute top-full left-0 right-0 mt-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg p-2 z-50 max-h-72 overflow-y-auto space-y-1">
+                  {projects.filter(p => p.name.toLowerCase().includes(topSearchQuery.toLowerCase()) || p.client.toLowerCase().includes(topSearchQuery.toLowerCase())).map(p => (
+                    <div 
+                      key={p.id}
+                      onClick={() => {
+                        setActiveTab('projects_clients');
+                        setActiveInlineProject(p);
+                        setTopSearchQuery('');
+                      }}
+                      className="p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer flex items-center justify-between text-xs"
+                    >
+                      <span className="font-semibold text-zinc-900 dark:text-white">{p.name}</span>
+                      <span className="text-[10.5px] text-zinc-400 font-mono">{p.client}</span>
+                    </div>
+                  ))}
+                  {EXACT_CLIENTS.filter(c => c.name.toLowerCase().includes(topSearchQuery.toLowerCase())).map(c => (
+                    <div 
+                      key={c.id}
+                      onClick={() => {
+                        showToast("Sorry, you don't have permission to view this.");
+                        setTopSearchQuery('');
+                      }}
+                      className="p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer flex items-center justify-between text-xs"
+                    >
+                      <span className="font-semibold text-zinc-900 dark:text-white">{c.name}</span>
+                      <span className="text-[10.5px] text-zinc-400 font-mono">Client</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 font-mono text-xs text-zinc-500 dark:text-zinc-400">
-              <span className="px-2.5 py-1 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
-                <Wifi className="w-3 h-3 text-emerald-500" />
-                <span>Adrian AK: {internetSpeed} Mbps</span>
-              </span>
-              <span className={`px-2.5 py-1 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 ${
-                batteryLevel <= 35 ? 'text-amber-600 border-amber-500/40' : 'text-zinc-700 dark:text-zinc-300'
-              }`}>
-                {isBatteryCharging ? <BatteryCharging className="w-3 h-3 text-amber-500 animate-pulse" /> : <Battery className="w-3 h-3 text-emerald-500" />}
-                <span>Battery: {batteryLevel}%</span>
-              </span>
-            </div>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 font-mono shadow-2xs">
+              <Wifi className="w-3 h-3 text-emerald-500" />
+              <span>Adrian AK: {internetSpeed} Mbps</span>
+            </span>
+
+            <button 
+              onClick={() => { setActiveTab('marsabit_power'); showToast('Opened Marsabit Power & Inverter Subsystem'); }}
+              title="View battery and KPLC status"
+              className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 font-mono shadow-2xs hover:border-amber-500 transition-colors cursor-pointer"
+            >
+              <Battery className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Battery: 78% est.</span>
+            </button>
 
             <button
               onClick={() => showToast('All systems operational in Marsabit.')}
-              className="p-2 rounded-full text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-white dark:hover:bg-zinc-900 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 cursor-pointer transition-colors"
+              className="p-2 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-white dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 cursor-pointer transition-colors shadow-2xs"
               title="Notifications"
             >
-              <Bell className="w-4 h-4 stroke-[1.75]" />
+              <Bell className="w-3.5 h-3.5 stroke-[1.75]" />
             </button>
 
             {/* Interactive Terminal Toggle */}
             <button
               onClick={() => setShowTerminal(prev => !prev)}
-              className="px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-mono font-bold text-zinc-700 dark:text-zinc-300 hover:border-amber-500/50 flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="Toggle Interactive Server Terminal (~)"
+              className="px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-mono font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+              title="Toggle Terminal (~)"
             >
               <Terminal className="w-3.5 h-3.5 text-amber-500" />
               <span>Terminal</span>
             </button>
 
-            {/* Direct Switch to Karani Law Advocates Portal */}
+            {/* Open Server button */}
+            <button
+              onClick={() => {
+                setActiveTab('server');
+                showToast('Opened Server Settings');
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-mono font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+              title="Open Server Settings"
+            >
+              <Server className="w-3.5 h-3.5 text-blue-500" />
+              <span>Open Server</span>
+            </button>
+
+            {/* Karani Law button */}
             <a
               href="/"
-              className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer shrink-0"
-              title="Open Karani Law Advocates & Managing Partner Portal"
+              className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-100 text-white dark:text-zinc-950 font-medium text-xs flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              title="Open Karani Law Portal"
             >
               <Scale className="w-3.5 h-3.5" />
-              <span>Karani Law Portal &rarr;</span>
+              <span>Karani Law</span>
             </a>
 
-            <div className="flex items-center gap-2 pl-2 border-l border-zinc-200 dark:border-zinc-800">
+            <div className="flex items-center gap-2 pl-2.5 border-l border-zinc-200 dark:border-zinc-800">
               <div className="w-7 h-7 rounded-full bg-amber-500 text-zinc-950 font-bold text-xs flex items-center justify-center font-mono">
                 GH
               </div>
-              <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 hidden lg:inline">
+              <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200 hidden xl:inline">
                 Guyoh Halake
               </span>
             </div>
@@ -1900,136 +2081,105 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Scrollable Work Canvas with subtle warm orange tint at low opacity */}
         <main 
-          className="flex-1 overflow-y-auto px-8 py-5 pb-20"
+          className="flex-1 overflow-y-auto px-8 py-5 pb-20 relative"
           style={{ backgroundColor: 'rgba(245, 158, 11, 0.025)' }}
         >
-          <div className="max-w-7xl mx-auto space-y-6">
+          {/* Subtle Background Watermark on Every Page */}
+          <div 
+            className="pointer-events-none fixed inset-0 flex items-center justify-center z-0 overflow-hidden" 
+            aria-hidden="true"
+          >
+            <img 
+              src="/p2l_logo_nobg.png" 
+              alt="" 
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = '/p2l_logo.jpeg';
+              }}
+              className="w-[620px] h-[620px] object-contain opacity-[0.065] dark:opacity-[0.075] select-none pointer-events-none"
+            />
+          </div>
 
-            {/* CLEAN WELCOME SECTION WITH PRACTICAL ACTION BUTTONS */}
-            <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">
-                    P3L DEVELOPERS &middot; LIVE
-                  </span>
-                </div>
-                <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                  {getGreeting()}, Guyo
-                </h1>
-                <p className="text-xs text-zinc-500 font-mono mt-0.5">
-                  Friday, 16 October 2026 &middot; Bare Metal Server &middot; All nodes operational
-                </p>
-              </div>
+          <div className="max-w-7xl mx-auto space-y-6 relative z-10">
 
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => { setActiveTab('career_education'); showToast('Opened Coursework & Classes'); }}
-                  className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-amber-500/50 bg-zinc-50 dark:bg-zinc-800/40 text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                >
-                  <Plus className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Class</span>
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('projects_clients'); showToast('Opened Projects Fleet'); }}
-                  className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-amber-500/50 bg-zinc-50 dark:bg-zinc-800/40 text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                >
-                  <Plus className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Project</span>
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('client_crm'); showToast('Opened Client CRM'); }}
-                  className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-amber-500/50 bg-zinc-50 dark:bg-zinc-800/40 text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                >
-                  <Plus className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Client</span>
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('finance_billing'); showToast('Opened Finance & Incomes'); }}
-                  className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-amber-500/50 bg-zinc-50 dark:bg-zinc-800/40 text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                >
-                  <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Income</span>
-                </button>
-
-                <button
-                  onClick={() => setShowAddTaskModal(true)}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Task</span>
-                </button>
-              </div>
-            </div>
-
-            {/* ========================================================================= */}
-            {/* TAB 1: DASHBOARD OVERVIEW */}
-            {/* ========================================================================= */}
+            {/* TAB 1: DASHBOARD */}
             {activeTab === 'dashboard' && (
               <div className="space-y-6 animate-fadeIn">
-                {/* Karani Law & BillsZip ERP Active Web Operations Bridge */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-950/30 via-zinc-900 to-indigo-950/30 border border-blue-500/30 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-11 h-11 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-                      <Scale className="w-5 h-5 text-blue-400" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <span className="font-bold text-sm text-zinc-900 dark:text-white">Karani Law &amp; BillsZip ERP Engine</span>
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-mono text-[10px] font-bold border border-emerald-500/30">
-                          ● Port 3000 Active
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${feeNotesScope === 'all' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-amber-500/15 text-amber-400 border-amber-500/30'}`}>
-                          Policy: {feeNotesScope === 'all' ? 'All Notes Visible' : 'Self Only'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-400 mt-1">
-                        Supabase PostgreSQL Connected &middot; {getFeeNotes().length} fee notes on ledger &middot; {EXACT_MATTERS.length} active matters &middot; {realUsers.length} provisioned staff
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => setActiveTab('karani_erp')}
-                      className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-all cursor-pointer"
-                    >
-                      Manage ERP &rarr;
-                    </button>
-                    <a
-                      href="/"
-                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <span>Open Law Portal</span>
-                      <ArrowUpRight className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                </div>
-
-                {/* Critical Incident Alert Banner (OdinBot I&M 502) */}
-                <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-300 dark:border-rose-900/60 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-3">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0"></span>
-                    <div>
-                      <span className="font-bold text-rose-950 dark:text-rose-200">
-                        CRITICAL ALERT: OdinBot I&amp;M Bank Mirror HTTP 502 Bad Gateway
+                {/* Welcome Section on Dashboard (No Card Background, Bigger Sora Typography) */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-zinc-200/80 dark:border-zinc-800/80">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="text-[11px] font-mono text-zinc-400 uppercase font-bold tracking-wider">
+                        P3L DEVELOPERS &middot; MARSABIT STATION
                       </span>
-                      <p className="text-rose-700 dark:text-rose-400 text-[11px] mt-0.5">
-                        Automated statement verification socket down. 14 webhook retries queued in memory.
-                      </p>
                     </div>
+                    <h1 className="text-3xl sm:text-4xl tracking-tight text-zinc-900 dark:text-white leading-tight">
+                      <span className="font-brand font-bold">{getGreeting()}, </span>
+                      <span className="font-brand italic font-semibold text-amber-500 dark:text-amber-400">Razak</span>
+                    </h1>
+                    <p className="text-xs text-zinc-500 font-mono mt-1">
+                      {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} &middot; Station Active &middot; Marsabit Node
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => setActiveTab('ai_infra')}
-                      className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-xs cursor-pointer"
-                    >
-                      Diagnose &amp; Restart Socket &rarr;
-                    </button>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    {/* Small minimalist alert */}
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
+                      <span className="font-medium">
+                        Bank Mirror: HTTP 502 socket error
+                      </span>
+                      <button
+                        onClick={() => { setActiveTab('ai_infra'); showToast('Checking socket connection'); }}
+                        className="underline hover:no-underline font-semibold ml-1 cursor-pointer"
+                      >
+                        Fix
+                      </button>
+                    </div>
+
+                    {/* Real minimalist buttons */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => { setActiveTab('career_education'); showToast('Opened Classes'); }}
+                        className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-700 dark:text-zinc-300 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <FiBookOpen className="w-3.5 h-3.5 text-zinc-500" />
+                        <span>Class</span>
+                      </button>
+
+                      <button
+                        onClick={() => { setActiveTab('projects_clients'); showToast('Opened Projects'); }}
+                        className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-700 dark:text-zinc-300 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <FiFolder className="w-3.5 h-3.5 text-zinc-500" />
+                        <span>Project</span>
+                      </button>
+
+                      <button
+                        onClick={() => { setActiveTab('client_crm'); showToast('Opened Clients'); }}
+                        className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-700 dark:text-zinc-300 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <FiUsers className="w-3.5 h-3.5 text-zinc-500" />
+                        <span>Client</span>
+                      </button>
+
+                      <button
+                        onClick={() => { setActiveTab('finance_billing'); showToast('Opened Finances'); }}
+                        className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-700 dark:text-zinc-300 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <FiDollarSign className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>Income</span>
+                      </button>
+
+                      <button
+                        onClick={() => setShowAddTaskModal(true)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <FiCheckSquare className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Task</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -2040,7 +2190,7 @@ export const AdminDashboard: React.FC = () => {
                     <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
                       <span className="font-bold text-zinc-900 dark:text-white font-sans flex items-center gap-2">
                         <Server className="w-4 h-4 text-amber-500" />
-                        Bare Metal Server (Razak)
+                        Bare metal server
                       </span>
                       <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-600 font-bold">1,048d</span>
                     </div>
@@ -2052,50 +2202,84 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                       <div className="flex justify-between items-center py-1 border-b border-zinc-100 dark:border-zinc-800/50">
                         <span className="text-zinc-400 font-sans">Power Batteries:</span>
-                        <strong className="text-emerald-600 dark:text-emerald-400">Working Very Well</strong>
+                        <strong className="text-zinc-500 dark:text-zinc-400">78% estimate</strong>
                       </div>
                       <div className="flex justify-between items-center py-1 border-b border-zinc-100 dark:border-zinc-800/50">
-                        <span className="text-zinc-400 font-sans">Physical NAS 12 TB:</span>
-                        <strong className="text-zinc-800 dark:text-zinc-200">4 TB Projects &middot; 3 TB AI</strong>
+                        <span className="text-zinc-400 font-sans">Physical Storage:</span>
+                        <strong className="text-zinc-800 dark:text-zinc-200">12 TB NAS (3 TB Free)</strong>
                       </div>
                       <div className="flex justify-between items-center py-1">
                         <span className="text-zinc-400 font-sans">Oracle Cloud VPS:</span>
-                        <strong className="text-purple-600 font-bold">45 TB Training Storage</strong>
+                        <strong className="text-zinc-800 dark:text-zinc-200">10 TB AI Storage</strong>
                       </div>
                     </div>
                   </div>
 
-                  {/* Card 2: Today (Simplified, Realistic) */}
-                  <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-3 font-sans">
-                    <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-                      <span className="text-xs font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
-                        <Calendar className="w-4 h-4 text-blue-500" />
-                        Today &middot; Friday Focus
-                      </span>
-                      <span className="text-[10px] font-mono text-zinc-400">16 Oct 2026</span>
-                    </div>
+                  {/* Card 2: Today (Dynamic Real-Time Date & Coursework Schedule) */}
+                  {(() => {
+                    const todayInfo = getTodaySchedule();
+                    return (
+                      <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-3 font-sans">
+                        <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+                          <span className="text-xs font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
+                            <Calendar className="w-4 h-4 text-blue-500" />
+                            Today &middot; {todayInfo.dayName}
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-400">{todayInfo.dateFormatted}</span>
+                        </div>
 
-                    <div className="space-y-2 text-xs">
-                      <div className="py-1 border-b border-zinc-100 dark:border-zinc-800/60">
-                        <span className="text-[10.5px] text-zinc-400 block font-mono">Next Class:</span>
-                        <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                          No class tomorrow (Weekend) &middot; Tue 7:15 AM (CUU 1102)
-                        </span>
+                        <div className="space-y-3 text-xs">
+                          <div>
+                            <span className="text-[10.5px] text-zinc-500 block mb-1">Classes today</span>
+                            {todayInfo.todayClasses.length ? (
+                              <div className="space-y-2">
+                                {todayInfo.todayClasses.map(({ course, slot }) => (
+                                  <div key={`${course.unit_code}-${slot.start}`} className="text-zinc-800 dark:text-zinc-200">
+                                    <span className="font-semibold">{course.unit_code} · {course.course}</span>
+                                    <span className="block text-zinc-600 dark:text-zinc-400">
+                                      {todayInfo.timeLabel(slot.start)}–{todayInfo.timeLabel(slot.end)} · {slot.location}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-zinc-700 dark:text-zinc-300">No classes scheduled today.</p>
+                            )}
+                          </div>
+
+                          {todayInfo.nextClasses.length > 0 && (
+                            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-2">
+                              <span className="text-[10.5px] text-zinc-500 block mb-1">
+                                    Next classes · {new Date(`${todayInfo.nextClassDate}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })}, {todayInfo.dateLabel(todayInfo.nextClassDate)}
+                              </span>
+                              <div className="space-y-1">
+                                {todayInfo.nextClasses.map(({ course, slot }) => (
+                                  <p key={`${course.unit_code}-${slot.start}`} className="text-zinc-700 dark:text-zinc-300">
+                                    <span className="font-medium">{course.unit_code} · {course.course}</span>
+                                    <span className="block text-zinc-500">{todayInfo.timeLabel(slot.start)}–{todayInfo.timeLabel(slot.end)} · {slot.location}</span>
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {todayInfo.upcomingExams.length > 0 && (
+                            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-2">
+                              <span className="text-[10.5px] text-zinc-500 block mb-1">Upcoming exams</span>
+                              {todayInfo.upcomingExams.map(exam => (
+                                <p key={exam.unit_code} className="text-zinc-700 dark:text-zinc-300">
+                                  <span className="font-medium">{exam.unit_code} · {exam.course}</span>
+                                  <span className="block text-zinc-500">
+                                    {todayInfo.dateLabel(exam.date)} · {todayInfo.timeLabel(exam.start)}–{todayInfo.timeLabel(exam.end)}
+                                  </span>
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="py-1 border-b border-zinc-100 dark:border-zinc-800/60">
-                        <span className="text-[10.5px] text-zinc-400 block font-mono">Current Project:</span>
-                        <span className="font-semibold text-amber-600 dark:text-amber-400">
-                          Karani Law Stage 4 UAT &amp; Fresh Fity POS
-                        </span>
-                      </div>
-                      <div className="py-1">
-                        <span className="text-[10.5px] text-zinc-400 block font-mono">Today's Tasks:</span>
-                        <span className="text-zinc-700 dark:text-zinc-300">
-                          4 tasks queued (Thermal test cut, Shein selector check, KCA lab)
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   {/* Card 3: Live GitHub Activity */}
                   <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-3 font-mono text-xs">
@@ -2111,8 +2295,8 @@ export const AdminDashboard: React.FC = () => {
 
                     <div className="space-y-2 text-[11px]">
                       {[
-                        { hash: 'b188210', msg: 'fix: 200ms debounce on ESC/POS paper auto-cutter', repo: 'Fresh Fity' },
-                        { hash: 'a12f909', msg: 'feat: Supabase advocate user provisioning module & RBAC', repo: 'Karani Law' },
+                        { hash: 'b188210', msg: 'fix: 200ms debounce on ESC/POS paper auto-cutter', repo: 'Fresh City' },
+                        { hash: 'a12f909', msg: 'feat: Supabase advocate user provisioning & RBAC', repo: 'Nyaga Law' },
                         { hash: 'c909e14', msg: 'chore: update Shein DOM selector for flash sale badge', repo: 'Sayara API' },
                         { hash: 'd401e19', msg: 'perf: lazy load catalog high-res beauty thumbnails', repo: 'Sayara Web' }
                       ].map((cmt, idx) => (
@@ -2127,22 +2311,82 @@ export const AdminDashboard: React.FC = () => {
                         </div>
                       ))}
                     </div>
+                    <div className="flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800 pt-3 font-sans">
+                      {[
+                        { label: 'GitHub', href: 'https://github.com/guyo-halake' },
+                        { label: 'Azure', href: 'https://portal.azure.com/' },
+                        { label: 'Vercel', href: 'https://vercel.com/dashboard' }
+                      ].map(platform => (
+                        <a
+                          key={platform.label}
+                          href={platform.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-700 px-2.5 py-1.5 text-[11px] font-medium text-zinc-700 dark:text-zinc-300 hover:border-orange-500 hover:text-orange-700 dark:hover:text-orange-400"
+                        >
+                          Open {platform.label} <ArrowUpRight className="w-3 h-3" />
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   
+                  {/* Receiving Line Card: Pochi la Biashara (+254 768 141 129) */}
+                  <div className="p-5 sm:p-6 rounded-xl bg-white dark:bg-zinc-900/70 border border-emerald-500/30 dark:border-emerald-500/20 shadow-xs flex flex-col justify-between space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Startup payments · Pochi
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[9.5px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                          P3L DEVELOPERS
+                        </span>
+                      </div>
+                      <div className="mt-3">
+                        <p className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 font-mono">
+                          +254 768 141 129
+                        </p>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 font-normal">
+                          Business payments for P3L Developers
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 space-y-2 text-xs">
+                      <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
+                        <span>Account Holder:</span>
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-200">Biftu Constructors Ltd</span>
+                      </div>
+                      <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
+                        <span>Company:</span>
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-200">P3L Developers subsidiary</span>
+                      </div>
+                      <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
+                        <span>Paybill:</span>
+                        <span className="font-mono text-zinc-900 dark:text-zinc-200 font-semibold">277277</span>
+                      </div>
+                      <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
+                        <span>Account number:</span>
+                        <span className="font-mono text-zinc-500 dark:text-zinc-400">To be added</span>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Revenue Card (Real Agreed Terms in KES) */}
                   <div className="p-5 sm:p-6 rounded-xl bg-white dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs flex flex-col justify-between space-y-4">
                     <div>
                       <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-medium">
-                        Monthly Software Retainers
+                        Revenue · November–December 2026
                       </span>
                       <div className="mt-3">
                         <p className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 font-mono">
-                          KES 8,000
+                          KES 23,786
                         </p>
                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 font-normal">
-                          Monthly software maintenance from active paying client retainers
+                          Revenue for November and December 2026
                         </p>
                       </div>
                     </div>
@@ -2150,15 +2394,15 @@ export const AdminDashboard: React.FC = () => {
                     <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 space-y-2 text-xs">
                       <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
                         <span>Fresh City POS:</span>
-                        <span className="font-mono text-zinc-900 dark:text-zinc-200 font-semibold">KES 3,500 / month</span>
+                        <span className="font-mono text-emerald-700 dark:text-emerald-400 font-semibold">KES 3,500 · Received</span>
                       </div>
                       <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
                         <span>Sayara Aesthetics:</span>
-                        <span className="font-mono text-zinc-900 dark:text-zinc-200 font-semibold">% Sales Commission</span>
+                        <span className="font-mono text-red-600 dark:text-red-400 font-semibold">Not received yet</span>
                       </div>
                       <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
-                        <span>SUVPlanet Marketplace:</span>
-                        <span className="font-mono text-zinc-900 dark:text-zinc-200 font-semibold">KES 400 / 2 months</span>
+                        <span>Muthokinju A:</span>
+                        <span className="font-mono text-emerald-700 dark:text-emerald-400 font-semibold">Paid</span>
                       </div>
                     </div>
                   </div>
@@ -2246,115 +2490,152 @@ export const AdminDashboard: React.FC = () => {
 
                 </div>
 
-                {/* Infrastructure Dual Storage & Hardware Telemetry Status */}
-                <div className="p-5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4 font-mono text-xs">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                {/* Live Safaricom Daraja 2.0 Webhook Stream Card */}
+                {/* <DarajaListenerCard showToast={showToast} /> */}
+
+                <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8 space-y-7">
+                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 pb-5">
                     <div>
-                      <span className="text-zinc-400 block uppercase text-[10px]">Dual Infrastructure Telemetry</span>
-                      <span className="font-bold text-zinc-900 dark:text-white mt-0.5 block text-sm">
-                        razak-server (Bare-Metal Marsabit) &middot; 24.3°C &middot; 86.888% Compute Load
-                      </span>
+                      <p className="text-xs text-zinc-500">Bare metal server · Marsabit</p>
+                      <h2 className="mt-1 text-xl sm:text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">
+                        Server storage
+                      </h2>
                     </div>
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-zinc-500 text-[11px]">Uptime: {formatUptime(uptimeSeconds)}</span>
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 font-bold text-[10px] border border-emerald-500/20">
-                        Adrian AK 3674 OK
-                      </span>
-                    </div>
+                    <p className="text-sm text-zinc-500">Total capacity across both storage locations</p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Storage Pool 1: 12 TB Physical NAS Array on razak-server */}
-                    <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200/70 dark:border-zinc-800 space-y-2">
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    <div className="space-y-5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <HardDrive className="w-4 h-4 text-amber-500" />
-                          <span className="font-bold text-zinc-800 dark:text-zinc-200">razak-server 12 TB NAS Pool</span>
+                          <HardDrive className="w-5 h-5 text-orange-600" />
+                          <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Physical storage</h3>
                         </div>
-                        <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                          Ubuntu ZFS NAS
-                        </span>
+                        <span className="text-lg font-semibold text-zinc-950 dark:text-white">12 TB</span>
                       </div>
-                      <p className="text-[11px] text-zinc-500">
-                        Total Physical Pool: <strong className="text-zinc-900 dark:text-white">12 TB</strong> &middot; Projects: <strong>4 TB</strong> &middot; Stored Archive: <strong>5 TB</strong>
-                      </p>
-                      <div className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden flex">
-                        <div className="h-full bg-amber-500" style={{ width: '33.3%' }} title="Projects 4 TB"></div>
-                        <div className="h-full bg-purple-500" style={{ width: '41.7%' }} title="Personal Media & Games 5 TB"></div>
-                        <div className="h-full bg-emerald-500/40 flex-1" title="Free 3 TB"></div>
+                      <div className="h-3 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800 flex" aria-label="Physical storage allocation">
+                        <div className="h-full bg-orange-700" style={{ width: '25%' }} title="Folders and contents: 3 TB" />
+                        <div className="h-full bg-orange-600" style={{ width: '5%' }} title="Media and movies: 600 GB" />
+                        <div className="h-full bg-orange-500" style={{ width: '16.67%' }} title="Games and software: 2 TB" />
+                        <div className="h-full bg-orange-400" style={{ width: '49.16%' }} title="Software and agents: 5.9 TB" />
+                        <div className="h-full bg-zinc-300 dark:bg-zinc-600" style={{ width: '4.17%' }} title="Free: 500 GB" />
                       </div>
-                      <div className="flex justify-between items-center text-[10px] text-zinc-400">
-                        <span>Media (2.3 TB), Games: GTA 4, San Andreas, NFS (1.6 TB)</span>
-                        <span className="font-bold text-emerald-600 dark:text-emerald-400">3 TB Free Space</span>
+                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {[
+                          { label: 'Folders and contents', amount: '3 TB' },
+                          { label: 'Media and movies', amount: '600 GB' },
+                          { label: 'Games and software', amount: '2 TB' },
+                          { label: 'Software and agents', amount: '5.9 TB' },
+                          { label: 'Free', amount: '500 GB' }
+                        ].map(item => (
+                          <div key={item.label} className="flex items-center justify-between py-2.5 text-sm">
+                            <span className="text-zinc-600 dark:text-zinc-400">{item.label}</span>
+                            <span className="font-medium text-zinc-900 dark:text-zinc-100">{item.amount}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
-                    {/* Storage Pool 2: Separate Oracle Cloud VPS Storage for AI */}
-                    <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200/70 dark:border-zinc-800 space-y-2">
+                    <div className="space-y-5 xl:border-l xl:border-zinc-100 xl:dark:border-zinc-800 xl:pl-8">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Cloud className="w-4 h-4 text-blue-500" />
-                          <span className="font-bold text-zinc-800 dark:text-zinc-200">Oracle Cloud VPS (AI Dedicated)</span>
+                          <Cloud className="w-5 h-5 text-orange-600" />
+                          <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Oracle Cloud VPS</h3>
                         </div>
-                        <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                          Separate Cloud VPS
-                        </span>
+                        <span className="text-lg font-semibold text-zinc-950 dark:text-white">10 TB · Full</span>
                       </div>
-                      <p className="text-[11px] text-zinc-500">
-                        Total AI Dedicated Array: <strong className="text-zinc-900 dark:text-white">45 TB (45,000 GB)</strong> &middot; Loaded: <strong>14.2 TB</strong>
-                      </p>
-                      <div className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: '31.5%' }}></div>
+                      <div className="h-3 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800 flex" aria-label="Oracle cloud storage fully allocated">
+                        <div className="h-full bg-orange-700" style={{ width: '20%' }} title="Najma's Agent 6864: 2 TB" />
+                        <div className="h-full bg-orange-500" style={{ width: '80%' }} title="Matta Gant / Odin: 8 TB" />
                       </div>
-                      <div className="flex justify-between items-center text-[10px] text-zinc-400">
-                        <span>OdinBot Models, Vectors & OCR</span>
-                        <span className="font-bold text-blue-600 dark:text-blue-400">30.8 TB High-Capacity Reserve</span>
+                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        <div className="flex items-center justify-between gap-4 py-3 text-sm">
+                          <span className="text-zinc-600 dark:text-zinc-400">Najma&apos;s Agent 6864</span>
+                          <span className="font-medium text-zinc-900 dark:text-zinc-100">2 TB</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 py-3 text-sm">
+                          <span className="text-zinc-600 dark:text-zinc-400">Matta Gant / Odin</span>
+                          <span className="font-medium text-zinc-900 dark:text-zinc-100">8 TB</span>
+                        </div>
                       </div>
+                      <p className="text-sm text-zinc-600 dark:text-zinc-400">All 10 TB is allocated to these services.</p>
                     </div>
                   </div>
-                </div>
+                </section>
               </div>
             )}
+
+            {/* ========================================================================= */}
+            {/* TAB: BILLS OF COSTS & TAXATION STUDIO */}
+            {/* ========================================================================= */}
+            {/* {activeTab === 'bills_studio' && (
+              <AdminBillsOfCostsStudioView
+                showToast={showToast}
+                requestedAction={billsStudioAction}
+                onActionHandled={() => setBillsStudioAction(null)}
+              />
+            )} */}
+
+            {/* ========================================================================= */}
+            {/* TAB: LEGAL AI AGENTS STUDIO (TAXATION, AUDITOR, DISPATCH, WATCHDOG) */}
+            {/* ========================================================================= */}
+            {/* {activeTab === 'legal_ai_agents' && (
+              <AdminAiLegalAgentsView showToast={showToast} currentUser={currentUser} />
+            )} */}
 
             {/* ========================================================================= */}
             {/* TAB: KARANI LAW & BILLSZIP ERP OPERATIONS BRIDGE */}
             {/* ========================================================================= */}
             {activeTab === 'karani_erp' && (
-              <div className="space-y-6 animate-fadeIn">
-                {/* 1. Header Banner */}
-                <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-6">
+                <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                        Live Web App &middot; Port 3000
-                      </span>
-                    </div>
-                    <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                      <Scale className="w-5 h-5 text-blue-500" />
-                      Karani Law &amp; BillsZip Legal ERP
-                    </h2>
+                    <a href="https://nyagahkithinji-advocates.azurewebsites.net/" target="_blank" rel="noreferrer" className="inline-flex items-center gap-3 text-zinc-900 dark:text-white">
+                      <img src="/logo.png" alt="Nyagah Law Firm" className="h-10 w-10 object-contain" />
+                      <span className="text-xl font-semibold tracking-tight">Nyagah Law Firm Bill Builder</span>
+                    </a>
                     <p className="text-xs text-zinc-500 font-sans">
-                      Advocates of the High Court of Kenya &middot; Statutory Bill of Costs Engine &amp; Practice Management
+                      Advocates of the High Court of Kenya ·{' '}
+                      <a href="https://nyagahkithinji-advocates.azurewebsites.net/" target="_blank" rel="noreferrer" className="text-orange-700 hover:underline dark:text-orange-400">
+                        nyagahkithinji-advocates.azurewebsites.net
+                      </a>
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2.5 flex-wrap">
+                    {([
+                      { type: 'import', label: 'Import Excel (.xlsx)', icon: Upload },
+                      { type: 'export', label: 'Export Court Excel (.xlsx)', icon: Download },
+                      { type: 'print', label: 'Print Court Schedule', icon: Printer },
+                    ] as const).map(action => (
+                      <button
+                        key={action.type}
+                        type="button"
+                        onClick={() => {
+                          setBillsStudioAction({ type: action.type, id: Date.now() });
+                          setActiveTab('bills_studio');
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-orange-500 text-xs font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 transition-colors"
+                      >
+                        <action.icon className="w-3.5 h-3.5" />
+                        {action.label}
+                      </button>
+                    ))}
                     <button
                       type="button"
                       onClick={() => {
-                        loadRealUsers();
-                        showToast('Database synchronization complete.');
+                        void loadErpData();
                       }}
-                      className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-800/60 text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 cursor-pointer transition-colors"
+                      className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-800/60 text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                      disabled={isLoadingErpData}
                     >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Refresh DB</span>
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingErpData ? 'animate-spin' : ''}`} />
+                      <span>{isLoadingErpData ? 'Loading' : 'Refresh'}</span>
                     </button>
 
                     <a
                       href="/"
-                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+                      className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
                     >
                       <span>Open Law Portal</span>
                       <ArrowUpRight className="w-3.5 h-3.5" />
@@ -2362,95 +2643,75 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 2. Top 4 Live Database Metrics */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs space-y-1">
-                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Fee Notes on Ledger</span>
+                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Fee notes</span>
                     <div className="text-xl font-bold font-mono text-zinc-900 dark:text-white">
-                      {getFeeNotes().length} Bills
+                      {isLoadingErpData ? '…' : `${erpFeeNotes.length} notes`}
                     </div>
-                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
-                      Live in Supabase
-                    </span>
+                    <button type="button" onClick={() => document.getElementById('erp-fee-notes')?.scrollIntoView({ behavior: 'smooth' })} className="text-[11px] text-orange-700 dark:text-orange-400">View ledger</button>
                   </div>
 
                   <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs space-y-1">
-                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Active Matters</span>
+                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Open matters</span>
                     <div className="text-xl font-bold font-mono text-zinc-900 dark:text-white">
-                      {EXACT_MATTERS.length} Matters
+                      {isLoadingErpData ? '…' : erpMatters.filter(matter => matter.status.toLowerCase() !== 'closed').length}
                     </div>
-                    <span className="text-[11px] text-blue-600 dark:text-blue-400 font-mono">
-                      High Court &amp; ELC
-                    </span>
+                    <button type="button" onClick={() => document.getElementById('erp-matters')?.scrollIntoView({ behavior: 'smooth' })} className="text-[11px] text-orange-700 dark:text-orange-400">View matters</button>
                   </div>
 
                   <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs space-y-1">
-                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Client Retainers</span>
+                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Clients</span>
                     <div className="text-xl font-bold font-mono text-zinc-900 dark:text-white">
-                      {EXACT_CLIENTS.length} Retainers
+                      {isLoadingErpData ? '…' : erpClients.length}
                     </div>
-                    <span className="text-[11px] text-amber-600 dark:text-amber-400 font-mono">
-                      Corporate &amp; Individual
-                    </span>
+                    <button type="button" onClick={() => document.getElementById('erp-clients')?.scrollIntoView({ behavior: 'smooth' })} className="text-[11px] text-orange-700 dark:text-orange-400">View clients</button>
                   </div>
 
                   <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs space-y-1">
-                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Provisioned Staff</span>
+                    <span className="text-[10.5px] font-mono text-zinc-400 uppercase font-bold tracking-wider">Users</span>
                     <div className="text-xl font-bold font-mono text-zinc-900 dark:text-white">
-                      {realUsers.length} Advocates
+                      {isLoadingErpData ? '…' : realUsers.length}
                     </div>
-                    <span className="text-[11px] text-purple-600 dark:text-purple-400 font-mono">
-                      Active User Accounts
-                    </span>
+                    <button type="button" onClick={() => document.getElementById('erp-users')?.scrollIntoView({ behavior: 'smooth' })} className="text-[11px] text-orange-700 dark:text-orange-400">View users</button>
                   </div>
                 </div>
+                {erpDataError && (
+                  <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+                    Could not load the firm database: {erpDataError}
+                  </p>
+                )}
 
-                {/* 3. Fee Notes Visibility Policy Control Card */}
-                <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-                      <Lock className="w-5 h-5 text-blue-400" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2.5">
-                        <span className="font-bold text-sm text-zinc-900 dark:text-white">Advocate Fee Notes Access Policy</span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${feeNotesScope === 'all' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'}`}>
-                          {feeNotesScope === 'all' ? '● Firm-Wide: All Notes Visible' : '● Restricted: Self Only'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-400 mt-0.5">
-                        {feeNotesScope === 'all'
-                          ? 'Allow All Fee Notes: Advocates see the entire firm ledger across all matters and counsel.'
-                          : 'Allow Self Only: Restricts advocates so they can only see fee notes they drafted themselves.'}
-                      </p>
-                    </div>
+                <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 py-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Fee note visibility</h3>
+                    <p className="text-xs text-zinc-500">This preference is saved in this browser.</p>
                   </div>
-
-                  <div className="flex items-center gap-2 shrink-0 bg-zinc-100 dark:bg-zinc-950/80 p-1 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => handleSetFeeNotesScope('all')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                         feeNotesScope === 'all'
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'text-zinc-500 hover:text-white'
+                          ? 'bg-orange-600 text-white'
+                          : 'border border-zinc-200 text-zinc-600 hover:border-orange-500 dark:border-zinc-700 dark:text-zinc-300'
                       }`}
                     >
-                      Allow All Fee Notes
+                      All notes
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSetFeeNotesScope('self')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                         feeNotesScope === 'self'
-                          ? 'bg-amber-600 text-white shadow-xs'
-                          : 'text-zinc-500 hover:text-white'
+                          ? 'bg-orange-600 text-white'
+                          : 'border border-zinc-200 text-zinc-600 hover:border-orange-500 dark:border-zinc-700 dark:text-zinc-300'
                       }`}
                     >
-                      Allow Self Only
+                      My notes
                     </button>
                   </div>
-                </div>
+                </section>
 
                 {/* 4. Schedule 6 Statutory Legal Math Diagnostic Tool */}
                 <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4">
@@ -2552,100 +2813,219 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 5. Advocate Staff Roster */}
-                <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4">
+                <section id="erp-users" className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
                   <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
                     <div>
-                      <h3 className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
-                        <Users className="w-4 h-4 text-purple-500" />
-                        Karani Law Provisioned Staff Roster ({realUsers.length})
+                      <h3 className="font-semibold text-base text-zinc-900 dark:text-white">
+                        Firm users
                       </h3>
-                      <p className="text-xs text-zinc-500 mt-0.5">
-                        Active accounts with database access to matters, billing, and document vaults
+                      <p className="text-sm text-zinc-500 mt-1">
+                        User accounts saved in the firm database
                       </p>
                     </div>
 
                     <button
                       type="button"
                       onClick={() => setShowAddRealUserModal(true)}
-                      className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs shadow-xs cursor-pointer"
+                      className="px-3.5 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white font-medium text-sm cursor-pointer"
                     >
-                      + Add Advocate to Database
+                      Add user
                     </button>
                   </div>
 
-                  <div className="space-y-2 font-mono text-xs">
-                    {realUsers.map(u => (
-                      <div key={u.id} className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex items-center justify-between">
-                        <div>
-                          <span className="font-bold text-zinc-900 dark:text-white font-sans block">{u.fullName}</span>
-                          <span className="text-[11px] text-zinc-400">{u.workEmail} &middot; LSK: {u.lskNo || 'Advocate'}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
-                            {u.role}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteRealUser(u.id, u.fullName)}
-                            className="p-1.5 text-zinc-400 hover:text-rose-600 transition-colors cursor-pointer"
-                            title="Delete User"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead className="bg-zinc-50 text-xs text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
+                        <tr>
+                          <th className="px-4 py-3 font-medium">Name</th>
+                          <th className="px-4 py-3 font-medium">Email</th>
+                          <th className="px-4 py-3 font-medium">Username</th>
+                          <th className="px-4 py-3 font-medium">Role</th>
+                          <th className="px-4 py-3 font-medium">Last sign in</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {realUsers.map(user => (
+                          <tr key={user.id} className="text-zinc-700 dark:text-zinc-300">
+                            <td className="px-4 py-3 font-medium text-zinc-900 dark:text-white">{user.fullName}</td>
+                            <td className="px-4 py-3">{user.workEmail || '—'}</td>
+                            <td className="px-4 py-3">{user.username || '—'}</td>
+                            <td className="px-4 py-3">{user.role}</td>
+                            <td className="px-4 py-3">
+                              {user.lastSignInAt
+                                ? new Date(user.lastSignInAt).toLocaleString()
+                                : 'Not recorded yet'}
+                            </td>
+                          </tr>
+                        ))}
+                        {!isLoadingErpData && realUsers.length === 0 && (
+                          <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No user accounts found.</td></tr>
+                        )}
+                        {isLoadingErpData && (
+                          <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">Loading users…</td></tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
+                </section>
 
-                {/* 6. Recent Fee Notes on Ledger */}
-                <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                <section id="erp-fee-notes" className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+                  <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
                     <div>
-                      <h3 className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-blue-500" />
-                        Recent Fee Notes on Ledger ({getFeeNotes().length})
+                      <h3 className="font-semibold text-base text-zinc-900 dark:text-white">
+                        Fee notes · {erpFeeNotes.length}
                       </h3>
-                      <p className="text-xs text-zinc-500 mt-0.5">
-                        Live bills of costs drafted and issued under the Advocates Remuneration Order
+                      <p className="text-sm text-zinc-500 mt-1">
+                        All fee notes returned by the firm database. Select a row to inspect its bill items.
                       </p>
                     </div>
-
-                    <a
-                      href="/"
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-bold"
-                    >
-                      View All on Fee Notes Page &rarr;
-                    </a>
                   </div>
 
-                  <div className="space-y-2 font-mono text-xs">
-                    {getFeeNotes().slice(0, 5).map(note => (
-                      <div key={note.id} className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex items-center justify-between">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-left text-sm">
+                      <thead className="bg-zinc-50 text-xs text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
+                        <tr>
+                          <th className="px-4 py-3 font-medium">Fee note</th>
+                          <th className="px-4 py-3 font-medium">Client</th>
+                          <th className="px-4 py-3 font-medium">Matter</th>
+                          <th className="px-4 py-3 font-medium">Date</th>
+                          <th className="px-4 py-3 font-medium">Status</th>
+                          <th className="px-4 py-3 text-right font-medium">Total</th>
+                          <th className="px-4 py-3 text-right font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {erpFeeNotes.map(note => (
+                          <tr key={note.id} className="text-zinc-700 dark:text-zinc-300">
+                            <td className="px-4 py-3 font-medium text-zinc-900 dark:text-white">{note.billNumber || note.id}</td>
+                            <td className="px-4 py-3">{note.clientName || '—'}</td>
+                            <td className="max-w-[260px] truncate px-4 py-3">{note.matterTitle || '—'}</td>
+                            <td className="px-4 py-3">{note.createdAt ? new Date(note.createdAt).toLocaleDateString() : '—'}</td>
+                            <td className="px-4 py-3 capitalize">{note.status.replace('_', ' ')}</td>
+                            <td className="px-4 py-3 text-right tabular-nums">KES {note.grandTotal.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right">
+                              <button type="button" onClick={() => setSelectedErpFeeNote(note)} className="font-medium text-orange-700 hover:underline dark:text-orange-400">View bill</button>
+                            </td>
+                          </tr>
+                        ))}
+                        {!isLoadingErpData && erpFeeNotes.length === 0 && (
+                          <tr><td colSpan={7} className="px-4 py-10 text-center text-zinc-500">No fee notes found in the firm database.</td></tr>
+                        )}
+                        {isLoadingErpData && (
+                          <tr><td colSpan={7} className="px-4 py-10 text-center text-zinc-500">Loading fee notes…</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                  <div id="erp-matters" className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                      <h3 className="font-semibold text-base text-zinc-900 dark:text-white">Matters · {erpMatters.length}</h3>
+                    </div>
+                    <div className="max-h-[440px] overflow-auto">
+                      <table className="w-full min-w-[560px] text-left text-sm">
+                        <thead className="sticky top-0 bg-zinc-50 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                          <tr>
+                            <th className="px-4 py-3 font-medium">Matter</th>
+                            <th className="px-4 py-3 font-medium">Case number</th>
+                            <th className="px-4 py-3 font-medium">Client</th>
+                            <th className="px-4 py-3 font-medium">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                          {erpMatters.map(matter => (
+                            <tr key={matter.id} className="text-zinc-700 dark:text-zinc-300">
+                              <td className="px-4 py-3 font-medium text-zinc-900 dark:text-white">{matter.title}</td>
+                              <td className="px-4 py-3">{matter.caseNo || '—'}</td>
+                              <td className="px-4 py-3">{matter.applicant || matter.respondent || '—'}</td>
+                              <td className="px-4 py-3 capitalize">{matter.status.replace('_', ' ')}</td>
+                            </tr>
+                          ))}
+                          {!isLoadingErpData && erpMatters.length === 0 && (
+                            <tr><td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No matters found.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div id="erp-clients" className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                      <h3 className="font-semibold text-base text-zinc-900 dark:text-white">Clients · {erpClients.length}</h3>
+                    </div>
+                    <div className="max-h-[440px] overflow-auto">
+                      <table className="w-full min-w-[480px] text-left text-sm">
+                        <thead className="sticky top-0 bg-zinc-50 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                          <tr>
+                            <th className="px-4 py-3 font-medium">Client</th>
+                            <th className="px-4 py-3 font-medium">Type</th>
+                            <th className="px-4 py-3 font-medium">Email</th>
+                            <th className="px-4 py-3 font-medium">Phone</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                          {erpClients.map(client => (
+                            <tr key={client.id} className="text-zinc-700 dark:text-zinc-300">
+                              <td className="px-4 py-3 font-medium text-zinc-900 dark:text-white">{client.company || client.name}</td>
+                              <td className="px-4 py-3">{client.category || '—'}</td>
+                              <td className="px-4 py-3">{client.email || '—'}</td>
+                              <td className="px-4 py-3">{client.phonePrimary || client.phone || '—'}</td>
+                            </tr>
+                          ))}
+                          {!isLoadingErpData && erpClients.length === 0 && (
+                            <tr><td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No clients found.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+
+                {selectedErpFeeNote && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Fee note details">
+                    <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+                      <div className="flex items-start justify-between gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-zinc-900 dark:text-white font-mono">{note.billNumber || note.id}</span>
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                              {note.status || 'Issued'}
-                            </span>
-                          </div>
-                          <span className="text-[11px] text-zinc-400 font-sans block mt-0.5">
-                            {note.matterTitle || 'Legal Services'} &middot; Client: {note.clientName || 'General'}
-                          </span>
+                          <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">
+                            {selectedErpFeeNote.billNumber || selectedErpFeeNote.id}
+                          </h3>
+                          <p className="mt-1 text-sm text-zinc-500">
+                            {selectedErpFeeNote.clientName} · {selectedErpFeeNote.matterTitle}
+                          </p>
                         </div>
-                        <div className="text-right">
-                          <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono block">
-                            KES {(note.grandTotal || 0).toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-zinc-400">
-                            {note.createdAt ? new Date(note.createdAt).toLocaleDateString() : 'Active'}
-                          </span>
-                        </div>
+                        <button type="button" onClick={() => setSelectedErpFeeNote(null)} className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm text-zinc-700 hover:border-orange-500 dark:border-zinc-700 dark:text-zinc-300">
+                          Close
+                        </button>
                       </div>
-                    ))}
+                      <div className="max-h-[calc(90vh-90px)] overflow-auto p-5">
+                        {Array.isArray(selectedErpFeeNote.excelData) && selectedErpFeeNote.excelData.length > 0 ? (
+                          <table className="w-full min-w-[680px] text-left text-sm">
+                            <thead className="sticky top-0 bg-zinc-50 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                              <tr>
+                                {Object.keys(selectedErpFeeNote.excelData[0] as Record<string, unknown>).map(key => (
+                                  <th key={key} className="px-3 py-2 font-medium">{key}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                              {selectedErpFeeNote.excelData.map((item, index) => (
+                                <tr key={index} className="text-zinc-700 dark:text-zinc-300">
+                                  {Object.values(item as Record<string, unknown>).map((value, cellIndex) => (
+                                    <td key={cellIndex} className="px-3 py-2">{String(value ?? '')}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p className="py-10 text-center text-sm text-zinc-500">No bill table was saved with this fee note.</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
@@ -2707,8 +3087,8 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Inline Project Header */}
-                    <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    {/* Minimalist Inline Project Header (No Card Background) */}
+                    <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div>
                         <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
                           {activeInlineProject.name}
@@ -3217,20 +3597,43 @@ export const AdminDashboard: React.FC = () => {
                 ) : (
                   // B. If NO project is active, display the main Projects & Clients overview list
                   <div className="space-y-6">
-                    {/* Header with Kanban & Filter Switcher */}
-                    <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    {/* Projects overview */}
+                    <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
                       <div>
                         <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
-                          Projects &amp; Hardware Fleet
+                        Startup Projects
                         </h2>
                         <p className="text-xs text-zinc-500 mt-0.5">
-                          Click any project to see its full story &middot; Switch between Cards, Kanban, or System Map
+                          Browse projects by client, category, or name. Open a workspace for the full project history.
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <label className="flex min-w-[220px] items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-zinc-400 focus-within:border-amber-500">
+                          <Search className="w-4 h-4 shrink-0" />
+                          <input
+                            type="search"
+                            value={projectSearchQuery}
+                            onChange={event => setProjectSearchQuery(event.target.value)}
+                            disabled={projectViewMode === 'map'}
+                            placeholder="Search projects or clients"
+                            aria-label="Search projects or clients"
+                            className="w-full bg-transparent text-xs text-zinc-900 dark:text-white placeholder:text-zinc-400 outline-none"
+                          />
+                          {projectSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setProjectSearchQuery('')}
+                              aria-label="Clear project search"
+                              className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </label>
+
                         {/* View Mode Toggle */}
-                        <div className="flex p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-semibold">
+                        <div className="flex p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-semibold overflow-x-auto">
                           <button
                             onClick={() => setProjectViewMode('grid')}
                             className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all ${
@@ -3254,7 +3657,11 @@ export const AdminDashboard: React.FC = () => {
                             Kanban
                           </button>
                           <button
-                            onClick={() => setProjectViewMode('map')}
+                            onClick={() => {
+                              setProjectViewMode('map');
+                              setProjectSearchQuery('');
+                              setProjectSubFilter('all');
+                            }}
                             className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all ${
                               projectViewMode === 'map' 
                                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-xs font-bold' 
@@ -3266,7 +3673,25 @@ export const AdminDashboard: React.FC = () => {
                           </button>
                         </div>
 
+                        {/* <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                          {[
+                            { label: 'Projects shown', value: visibleProjects.length, detail: `of ${projects.length} total` },
+                            { label: 'Client projects', value: projects.filter(project => project.projectGroup === 'client').length, detail: 'Across the portfolio' },
+                            { label: 'Paying projects', value: projects.filter(project => project.isPaying).length, detail: 'Marked as paying' },
+                            { label: 'Allocated storage', value: `${projects.reduce((total, project) => total + project.allocatedStorageGb, 0).toLocaleString()} GB`, detail: 'Across listed projects' },
+                          ].map(metric => (
+                            <div key={metric.label} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{metric.label}</p>
+                              <div className="mt-1 flex items-baseline justify-between gap-2">
+                                <strong className="text-lg text-zinc-900 dark:text-white">{metric.value}</strong>
+                                <span className="text-[10px] text-zinc-400">{metric.detail}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div> */}
+
                         {/* Live Service Health Prober */}
+                        {/*
                         <button
                           onClick={runServiceHealthCheck}
                           disabled={isProbingServices}
@@ -3275,10 +3700,12 @@ export const AdminDashboard: React.FC = () => {
                           <Activity className={`w-3.5 h-3.5 ${isProbingServices ? 'animate-spin text-amber-500' : 'text-emerald-500'}`} />
                           <span>{isProbingServices ? 'Probing...' : 'Check System Status'}</span>
                         </button>
+                        */}
                       </div>
                     </div>
 
                     {/* Live Service Probe Results Bar */}
+                    {/*
                     {probeResults && (
                       <div className="p-4 rounded-2xl bg-zinc-950 text-white border border-zinc-800 space-y-2.5 text-xs animate-fadeIn font-mono">
                         <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
@@ -3301,9 +3728,10 @@ export const AdminDashboard: React.FC = () => {
                         </div>
                       </div>
                     )}
+                    */}
 
-                    {/* Filter Sub-nav */}
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs font-mono">
+                    {/* Category filters apply to the project list and board, not the complete system map. */}
+                    {projectViewMode !== 'map' && <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs font-mono">
                       {[
                         { id: 'all', label: `All (${projects.length})` },
                         { id: 'client', label: `Client Projects (${projects.filter(p => p.projectGroup === 'client').length})` },
@@ -3324,74 +3752,97 @@ export const AdminDashboard: React.FC = () => {
                           {flt.label}
                         </button>
                       ))}
-                    </div>
+                    </div>}
+
+                    {projectViewMode !== 'map' && <p className="text-[11px] text-zinc-500">
+                      Showing <strong className="text-zinc-700 dark:text-zinc-300">{visibleProjects.length}</strong> {visibleProjects.length === 1 ? 'project' : 'projects'}
+                      {projectSearchQuery.trim() && <> matching <strong className="text-zinc-700 dark:text-zinc-300">“{projectSearchQuery.trim()}”</strong></>}
+                    </p>}
 
                     {/* VIEW 1: Cards Grid Mode */}
                     {projectViewMode === 'grid' && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                        {projects
-                          .filter(p => {
-                            if (projectSubFilter === 'all') return true;
-                            return p.projectGroup === projectSubFilter;
-                          })
-                          .map(p => (
+                      visibleProjects.length ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                          {visibleProjects.map(p => (
                             <div 
                               key={p.id} 
                               onClick={() => {
                                 setActiveInlineProject(p);
                                 setProjectWorkspaceTab('overview');
                               }}
-                              className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs flex flex-col justify-between space-y-4 cursor-pointer hover:border-amber-500/50 transition-all group"
+                              className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xs flex flex-col justify-between gap-4 cursor-pointer hover:border-amber-500/60 hover:shadow-md transition-all group"
                             >
                               <div className="space-y-2.5">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
-                                    {p.currentVersion} &middot; {p.category}
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="truncate text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                                    {p.category}
                                   </span>
-                                  <span className="text-[10.5px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                    {p.isRealDb ? 'Real Supabase' : p.isPaying ? 'Paying Client' : 'Internal'}
+                                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${
+                                    p.isRealDb
+                                      ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300'
+                                      : p.isPaying
+                                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                        : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+                                  }`}>
+                                    {p.isRealDb ? 'Real Supabase' : p.isPaying ? 'Paying client' : 'Internal'}
                                   </span>
                                 </div>
 
-                                <h3 className="font-bold text-sm text-zinc-900 dark:text-white font-sans group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                                <h3 className="font-bold text-base leading-snug text-zinc-900 dark:text-white font-sans group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
                                   {p.name}
                                 </h3>
-                                
+                                <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+                                  {projectDescriptions[p.id]}
+                                </p>
                                 <p className="text-xs text-zinc-500">
-                                  Client: <strong className="text-zinc-800 dark:text-zinc-200">{p.client}</strong>
+                                  <strong className="font-medium text-zinc-800 dark:text-zinc-200">{p.client}</strong>
                                 </p>
 
-                                <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800 text-[11px] font-mono space-y-1">
-                                  <div className="flex justify-between">
-                                    <span className="text-zinc-400">Agreed Contract:</span>
-                                    <span className="font-semibold text-zinc-800 dark:text-zinc-200">{p.monthlyFee}</span>
+                                <div className="grid grid-cols-2 gap-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800 p-3 text-[11px]">
+                                  <div className="min-w-0">
+                                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-zinc-400">Agreement</span>
+                                    <span className="mt-1 block truncate font-medium text-zinc-800 dark:text-zinc-200" title={p.monthlyFee}>{p.monthlyFee}</span>
                                   </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-zinc-400">Storage:</span>
-                                    <span className="text-zinc-500">{p.allocatedStorageGb} GB</span>
+                                  <div>
+                                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-zinc-400">Storage</span>
+                                    <span className="mt-1 block font-medium text-zinc-800 dark:text-zinc-200">{p.allocatedStorageGb} GB</span>
                                   </div>
                                 </div>
                               </div>
 
-                              <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-center text-xs">
-                                <span className="text-zinc-400 text-[11px] font-mono">{p.activeSince}</span>
+                              <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-center gap-2 text-xs">
+                                <span className="min-w-0 truncate text-zinc-400 text-[11px]" title={`Started ${p.activeSince}`}>Started {p.activeSince}</span>
                                 <span className="font-bold text-amber-600 dark:text-amber-400 group-hover:underline">
-                                  Open Workspace &rarr;
+                                  Open workspace &rarr;
                                 </span>
                               </div>
                             </div>
                           ))}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 px-6 py-12 text-center">
+                          <Search className="mx-auto h-6 w-6 text-zinc-400" />
+                          <p className="mt-3 text-sm font-semibold text-zinc-800 dark:text-zinc-200">No projects match this search</p>
+                          <p className="mt-1 text-xs text-zinc-500">Try another name or select a different project category.</p>
+                          <button
+                            type="button"
+                            onClick={() => { setProjectSearchQuery(''); setProjectSubFilter('all'); }}
+                            className="mt-4 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                          >
+                            Clear filters
+                          </button>
+                        </div>
+                      )
                     )}
 
                     {/* VIEW 2: 4-Column Kanban Board Mode */}
-                    {projectViewMode === 'kanban' && (
+                    {projectViewMode === 'kanban' && visibleProjects.length > 0 && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 font-sans text-xs">
                         {[
-                          { title: 'Backlog / Staged', status: 'Backlog', color: 'border-zinc-300 dark:border-zinc-700', prjs: projects.filter(p => p.progress < 70) },
-                          { title: 'Building / Active', status: 'Building', color: 'border-blue-500/50', prjs: projects.filter(p => p.progress >= 70 && p.progress < 90) },
-                          { title: 'In Review / UAT', status: 'Review', color: 'border-amber-500/50', prjs: projects.filter(p => p.progress >= 90 && !p.status.includes('Live')) },
-                          { title: 'Live In Production', status: 'Live', color: 'border-emerald-500/50', prjs: projects.filter(p => p.status.includes('Live')) }
+                          { title: 'Backlog / Staged', status: 'Backlog', color: 'border-zinc-300 dark:border-zinc-700', prjs: visibleProjects.filter(p => p.progress < 70) },
+                          { title: 'Building / Active', status: 'Building', color: 'border-blue-500/50', prjs: visibleProjects.filter(p => p.progress >= 70 && p.progress < 90) },
+                          { title: 'In Review / UAT', status: 'Review', color: 'border-amber-500/50', prjs: visibleProjects.filter(p => p.progress >= 90 && !p.status.includes('Live')) },
+                          { title: 'Live In Production', status: 'Live', color: 'border-emerald-500/50', prjs: visibleProjects.filter(p => p.status.includes('Live')) }
                         ].map((col) => (
                           <div key={col.title} className="p-3.5 rounded-2xl bg-zinc-100/70 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-800 space-y-3">
                             <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-700/60 font-mono">
@@ -3418,6 +3869,7 @@ export const AdminDashboard: React.FC = () => {
                                     </span>
                                   </div>
                                   <h4 className="font-bold text-xs text-zinc-900 dark:text-white">{p.name}</h4>
+                                  <p className="text-[11px] leading-relaxed text-zinc-500">{projectDescriptions[p.id]}</p>
                                   <p className="text-[11px] text-zinc-500">Client: {p.client}</p>
                                   <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex justify-between text-[10px] font-mono text-zinc-400">
                                     <span>{p.monthlyFee}</span>
@@ -3428,6 +3880,19 @@ export const AdminDashboard: React.FC = () => {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {projectViewMode === 'kanban' && visibleProjects.length === 0 && (
+                      <div className="rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 px-6 py-12 text-center">
+                        <Search className="mx-auto h-6 w-6 text-zinc-400" />
+                        <p className="mt-3 text-sm font-semibold text-zinc-800 dark:text-zinc-200">No projects match this search</p>
+                        <button
+                          type="button"
+                          onClick={() => { setProjectSearchQuery(''); setProjectSubFilter('all'); }}
+                          className="mt-4 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        >
+                          Clear filters
+                        </button>
                       </div>
                     )}
 
@@ -3943,6 +4408,14 @@ export const AdminDashboard: React.FC = () => {
               </div>
             )}
 
+            {/* CLIENTS TAB */}
+            {activeTab === 'client_crm' && (
+              <AdminClientCrmView 
+                onOpenDossier={() => showToast("Sorry, you don't have permission to view this.")}
+                showToast={showToast} 
+              />
+            )}
+
             {/* OPERATIONS LOG TAB */}
             {activeTab === 'operations_log' && (
               <AdminOperationsLogView showToast={showToast} />
@@ -4025,8 +4498,6 @@ export const AdminDashboard: React.FC = () => {
             {activeTab === 'server' && (
               <AdminServerView 
                 internetSpeed={internetSpeed}
-                batteryLevel={batteryLevel}
-                isBatteryCharging={isBatteryCharging}
                 uptimeSeconds={uptimeSeconds}
                 formatUptime={formatUptime}
                 showToast={showToast}
@@ -4270,73 +4741,21 @@ export const AdminDashboard: React.FC = () => {
             {/* TAB 10: COMMS & MESSAGING */}
             {/* ========================================================================= */}
             {activeTab === 'comms_messaging' && (
-              <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-6 animate-fadeIn">
-                <div className="pb-4 border-b border-zinc-100 dark:border-zinc-800">
-                  <h2 className="font-bold text-lg text-zinc-900 dark:text-white">
-                    Operational Communications &amp; Dispatch
-                  </h2>
-                  <p className="text-xs text-zinc-500">
-                    Marsabit telemetry alerts, WhatsApp client notifications, and Starlink failover dispatcher
-                  </p>
-                </div>
-
-                <div className="space-y-3 font-mono text-xs">
-                  <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30">
-                    <div>
-                      <span className="font-bold text-zinc-900 dark:text-white block font-sans">Adrian AK 3674 Optical Ticker</span>
-                      <span className="text-[10px] text-zinc-400">Throughput: {internetSpeed} Mbps &middot; Latency: 12ms &middot; Status: Nominal</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">Active</span>
-                  </div>
-                  <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30">
-                    <div>
-                      <span className="font-bold text-zinc-900 dark:text-white block font-sans">Marsabit Power Subsystem</span>
-                      <span className="text-[10px] text-zinc-400">Battery Level: {batteryLevel}% &middot; Mode: {isBatteryCharging ? 'Charging' : 'Running on Station Batteries'}</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 text-[10px] font-bold">Monitored</span>
-                  </div>
-                  <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30">
-                    <div>
-                      <span className="font-bold text-zinc-900 dark:text-white block font-sans">Oracle VPS WireGuard Mesh</span>
-                      <span className="text-[10px] text-zinc-400">45 TB AI Array &middot; 42ms Ping &middot; 10 Gbps Interconnect</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 text-[10px] font-bold">Connected</span>
-                  </div>
-                </div>
-              </div>
+              <AdminMessagesHubView showToast={showToast} />
             )}
 
             {/* ========================================================================= */}
             {/* TAB 11: SUPPORT & TICKETING */}
             {/* ========================================================================= */}
             {activeTab === 'support_ticketing' && (
-              <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-6 animate-fadeIn">
-                <div className="pb-4 border-b border-zinc-100 dark:border-zinc-800">
-                  <h2 className="font-bold text-lg text-zinc-900 dark:text-white">
-                    Hardware &amp; Systems Ticketing
-                  </h2>
-                  <p className="text-xs text-zinc-500">
-                    Client station tickets, thermal printer maintenance, and fiber link telemetry logs
-                  </p>
-                </div>
+              <AdminSupportDeskView showToast={showToast} />
+            )}
 
-                <div className="space-y-3 font-mono text-xs">
-                  <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-                    <div>
-                      <span className="font-bold text-zinc-900 dark:text-white block font-sans">Fresh City Supermarket &middot; Register 01 Printer Ribbon</span>
-                      <span className="text-[10px] text-zinc-400">ESC/POS USB Bridge &middot; Checked by Guyoh &middot; Operational</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">Resolved</span>
-                  </div>
-                  <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-                    <div>
-                      <span className="font-bold text-zinc-900 dark:text-white block font-sans">Adrian AK 3674 &middot; Marsabit Uplink Optimization</span>
-                      <span className="text-[10px] text-zinc-400">Latency tuned from 28ms down to 12ms &middot; No failover connected</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">Resolved</span>
-                  </div>
-                </div>
-              </div>
+            {/* ========================================================================= */}
+            {/* TAB 12: MARSABIT POWER & INVERTER */}
+            {/* ========================================================================= */}
+            {activeTab === 'marsabit_power' && (
+              <MarsabitPowerView />
             )}
 
           </div>
@@ -4347,13 +4766,14 @@ export const AdminDashboard: React.FC = () => {
       {/* REAL USER MODAL (KARANI LAW) */}
       {/* ========================================================================= */}
       {showAddRealUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-2xl space-y-4">
-            <h3 className="font-bold text-sm text-zinc-900 dark:text-white">Add Real User to Karani Law Supabase DB</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+            <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Add firm user</h3>
+            <p className="mt-1 text-sm text-zinc-500">Creates a sign-in account and saves the user to this firm.</p>
             <form onSubmit={handleCreateRealUser} className="space-y-3 text-xs">
               <input 
                 type="text" 
-                placeholder="Full Name (e.g. Jane Wambui)"
+                placeholder="Full name"
                 value={newUserFullName}
                 onChange={e => setNewUserFullName(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
@@ -4361,15 +4781,48 @@ export const AdminDashboard: React.FC = () => {
               />
               <input 
                 type="email" 
-                placeholder="Work Email (Login)"
+                placeholder="Email"
                 value={newUserEmail}
                 onChange={e => setNewUserEmail(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
                 required
               />
+              <input
+                type="text"
+                placeholder="Username"
+                value={newUserUsername}
+                onChange={e => setNewUserUsername(e.target.value)}
+                pattern="[A-Za-z0-9._-]{3,40}"
+                title="Use 3–40 letters, numbers, dots, underscores or hyphens."
+                className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Temporary password (at least 8 characters)"
+                value={newUserPassword}
+                onChange={e => setNewUserPassword(e.target.value)}
+                minLength={8}
+                autoComplete="new-password"
+                className="w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                required
+              />
+              <label className="block text-zinc-600 dark:text-zinc-300">
+                Role
+                <select
+                  value={newUserRole}
+                  onChange={e => setNewUserRole(e.target.value as 'Admin' | 'Advocate')}
+                  className="mt-1 w-full p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                >
+                  <option value="Advocate">Advocate</option>
+                  <option value="Admin">Admin</option>
+                </select>
+              </label>
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowAddRealUserModal(false)} className="px-3 py-1.5 border rounded-xl">Cancel</button>
-                <button type="submit" className="px-4 py-1.5 bg-amber-500 font-bold rounded-xl text-zinc-950">Save to Live Database</button>
+                <button type="button" onClick={() => setShowAddRealUserModal(false)} disabled={isCreatingRealUser} className="px-3 py-1.5 border border-zinc-200 rounded-lg text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">Cancel</button>
+                <button type="submit" disabled={isCreatingRealUser} className="px-4 py-1.5 rounded-lg bg-orange-600 font-medium text-white disabled:opacity-50">
+                  {isCreatingRealUser ? 'Creating…' : 'Create user'}
+                </button>
               </div>
             </form>
           </div>

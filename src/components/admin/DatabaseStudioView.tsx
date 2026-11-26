@@ -179,7 +179,14 @@ export const DatabaseStudioView: React.FC<DatabaseStudioViewProps> = ({ currentU
     setFeeNotes(getFeeNotes());
     setMatters(getMatters());
     setClients(getClients());
-    fetchFirmUsers().then(u => { if (u && u.length > 0) setUsers(u); }).catch(() => {});
+    if (currentUser?.firmId) {
+      void fetchFirmUsers(currentUser.firmId).then(setUsers).catch(error => {
+        setUsers([]);
+        showToast('error', 'Could not load firm users', error.message || 'Check your connection and database permissions.');
+      });
+    } else {
+      setUsers([]);
+    }
     try {
       const t = localStorage.getItem('BILLSZIP_SUPPORT_TICKETS_REAL');
       if (t) setTickets(JSON.parse(t));

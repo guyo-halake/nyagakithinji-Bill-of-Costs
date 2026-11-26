@@ -84,7 +84,7 @@ INSERT INTO public.users (
 VALUES (
     'b0000000-0000-0000-0000-000000000001',
     'a0000000-0000-0000-0000-000000000001',
-    'Triple vic',
+    'Victor Karani',
     'alexkaranivic@gmail.com',
     'P.105/9920',
     'admin',

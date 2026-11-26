@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, SystemUser } from '../../services/supabase';
+import { getCurrentUserProfile } from '../../services/auth';
 import {
   User,
   Briefcase,
@@ -34,6 +35,8 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
   const [user, setUser] = useState<SystemUser>(resolveUser);
   const [isEditing, setIsEditing] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [profileError, setProfileError] = useState('');
 
   // Form Fields
   const [fullName, setFullName] = useState(user.fullName || '');
@@ -58,6 +61,25 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
     setPhonePrimary(updated.phonePrimary || '');
     setPhoneSecondary(updated.phoneSecondary || '');
     setAvatarPreview(updated.avatarUrl || '');
+    let isMounted = true;
+    void getCurrentUserProfile().then(profile => {
+      if (!isMounted || !profile) return;
+      setUser(profile);
+      setFullName(profile.fullName);
+      setAdvocateTitle(profile.advocateTitle || '');
+      setLskNo(profile.lskNo || '');
+      setPosition(profile.position || '');
+      setWorkEmail(profile.workEmail || '');
+      setPersonalEmail(profile.personalEmail || '');
+      setPhonePrimary(profile.phonePrimary || '');
+      setPhoneSecondary(profile.phoneSecondary || '');
+      setAvatarPreview(profile.avatarUrl || '');
+    }).catch(error => {
+      if (isMounted) {
+        setProfileError(error instanceof Error ? error.message : 'Could not load your saved profile.');
+      }
+    });
+    return () => { isMounted = false; };
   }, [currentUser]);
 
   // Handle Local File Avatar Upload
@@ -87,34 +109,62 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
 
     const updatedUser: SystemUser = {
       ...user,
-      fullName: fullName.trim() || user.fullName,
-      advocateTitle: (advocateTitle.trim() || fullName.trim()).replace(/^Adv\.?\s*/i, ''),
-      lskNo: lskNo.trim() || user.lskNo,
-      position: position.trim() || user.position,
-      workEmail: workEmail.trim() || user.workEmail,
-      personalEmail: personalEmail.trim() || user.personalEmail,
-      phonePrimary: phonePrimary.trim() || user.phonePrimary,
-      phoneSecondary: phoneSecondary.trim() || user.phoneSecondary,
-      avatarUrl: avatarPreview || user.avatarUrl
+      fullName: fullName.trim(),
+      advocateTitle: advocateTitle.trim().replace(/^Adv\.?\s*/i, ''),
+      lskNo: lskNo.trim(),
+      position: position.trim(),
+      workEmail: workEmail.trim(),
+      personalEmail: personalEmail.trim(),
+      phonePrimary: phonePrimary.trim(),
+      phoneSecondary: phoneSecondary.trim(),
+      avatarUrl: avatarPreview || undefined
     };
 
-    if (!updatedUser.id) return;
-    const { data, error } = await supabase.from('users').update({
-      full_name: updatedUser.fullName,
-      lsk_no: updatedUser.lskNo,
-      position: updatedUser.position,
-      email: updatedUser.workEmail,
-      phone_primary: updatedUser.phonePrimary,
-      phone_secondary: updatedUser.phoneSecondary,
-      avatar_url: updatedUser.avatarUrl?.startsWith('data:') ? null : updatedUser.avatarUrl || null,
-    }).eq('id', updatedUser.id).select('*').single();
-    if (error) return;
-    const savedUser = { ...updatedUser, fullName: data.full_name, lskNo: data.lsk_no || '', position: data.position || '' };
-    setUser(savedUser);
-    setIsEditing(false);
-    setSaveSuccess(true);
-    window.dispatchEvent(new CustomEvent('userProfileUpdated', { detail: savedUser }));
-    setTimeout(() => setSaveSuccess(false), 3500);
+    if (!updatedUser.id || !updatedUser.firmId) {
+      setProfileError('Your signed-in profile could not be matched to a firm account.');
+      return;
+    }
+
+    setIsSaving(true);
+    setProfileError('');
+    try {
+      const { data, error } = await supabase.from('users').update({
+        full_name: updatedUser.fullName,
+        advocate_title: updatedUser.advocateTitle || null,
+        lsk_no: updatedUser.lskNo || null,
+        position: updatedUser.position || null,
+        department: updatedUser.department || null,
+        email: updatedUser.workEmail,
+        personal_email: updatedUser.personalEmail || null,
+        phone_primary: updatedUser.phonePrimary || null,
+        phone_secondary: updatedUser.phoneSecondary || null,
+        avatar_url: updatedUser.avatarUrl?.startsWith('data:') ? null : updatedUser.avatarUrl || null,
+      }).eq('id', updatedUser.id).eq('firm_id', updatedUser.firmId).select('*').single();
+      if (error) throw error;
+
+      const savedUser: SystemUser = {
+        ...updatedUser,
+        fullName: data.full_name,
+        advocateTitle: data.advocate_title || '',
+        lskNo: data.lsk_no || '',
+        position: data.position || '',
+        department: data.department || '',
+        workEmail: data.email,
+        personalEmail: data.personal_email || '',
+        phonePrimary: data.phone_primary || '',
+        phoneSecondary: data.phone_secondary || '',
+        avatarUrl: data.avatar_url || undefined,
+      };
+      setUser(savedUser);
+      setIsEditing(false);
+      setSaveSuccess(true);
+      window.dispatchEvent(new CustomEvent('userProfileUpdated', { detail: savedUser }));
+      setTimeout(() => setSaveSuccess(false), 3500);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Could not save your profile.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -188,6 +238,12 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
               <span className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-black absolute -bottom-1 -right-1" title="Active Advocate" />
             </div>
 
+            {profileError && (
+              <p role="alert" className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+                {profileError}
+              </p>
+            )}
+
             {/* Profile Main Titles */}
             <div className="space-y-1.5 min-w-0">
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
@@ -203,9 +259,11 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
                 {user.advocateTitle || user.fullName}
               </h1>
 
-              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 font-mono">
-                LSK Admission No: {user.lskNo || 'P.105/9920'}
-              </p>
+              {user.lskNo && (
+                <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 font-mono">
+                  LSK Admission No: {user.lskNo}
+                </p>
+              )}
 
               <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
                 {user.position}
@@ -235,9 +293,10 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
                 <button
                   type="button"
                   onClick={() => handleSaveProfile()}
+                  disabled={isSaving}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-sm shadow-emerald-500/20 cursor-pointer"
                 >
-                  <Save className="w-4 h-4" /> Save Profile
+                  <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save Profile'}
                 </button>
               </div>
             )}
@@ -286,7 +345,6 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
                   type="text"
                   value={advocateTitle}
                   onChange={(e) => setAdvocateTitle(e.target.value)}
-                  placeholder="e.g. Nyagah Kithinji"
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -299,7 +357,6 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
                   type="text"
                   value={lskNo}
                   onChange={(e) => setLskNo(e.target.value)}
-                  placeholder="e.g. P.105/1992"
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -312,7 +369,6 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
                   type="text"
                   value={position}
                   onChange={(e) => setPosition(e.target.value)}
-                  placeholder="e.g. Senior Managing Partner & Advocate"
                   className="w-full bg-[var(--bg-subtle)] border border-[var(--border-color)] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -399,7 +455,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({ currentUser }) => 
 
                 <div>
                   <span className="text-slate-400 block text-[11px] uppercase font-semibold">LSK Admission Number:</span>
-                  <p className="font-mono font-bold text-sm text-slate-900 dark:text-white">{user.lskNo || 'P.105/9920'}</p>
+                  <p className="font-mono font-bold text-sm text-slate-900 dark:text-white">{user.lskNo || '—'}</p>
                 </div>
 
                 <div>

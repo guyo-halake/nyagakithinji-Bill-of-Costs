@@ -13,8 +13,8 @@ import {
   Scale,
   FileText,
   DollarSign,
+  CreditCard,
   ChevronRight,
-  Sparkles,
   FileCode,
   Eye,
   EyeOff,
@@ -78,7 +78,7 @@ import {
   persistFeeNotes,
   EXACT_MATTERS,
   EXACT_CLIENTS,
-  SEEDED_USERS
+  supabase,
 } from '../../services/supabase';
 import {
   createImportedFeeNote,
@@ -127,12 +127,27 @@ import { calculateLegalBill, BillCalculationResult } from '../../services/api';
 
 import * as XLSX from 'xlsx';
 import { showToast } from '../admin/ToastNotification';
+import { isNyagahAgentConfigured, sendNyagahChatMessage } from '../../services/nyagahAgent';
 
 interface DashboardViewProps {
   onNavigateTab: (tab: string, targetUserId?: string) => void;
   onNavigateToBuilder?: (arg1?: any, arg2?: any) => void;
   onOpenRecents?: () => void;
   currentUser?: SystemUser | null;
+}
+
+interface DashboardPaymentRecord {
+  id: string;
+  feeNoteId: string;
+  amount: number;
+  paymentDate: string;
+  reference: string;
+  status: 'pending' | 'confirmed' | 'reversed';
+  paymentMethod: string;
+  description: string;
+  phoneNumber: string;
+  accountNumber: string;
+  providerReference: string;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -159,21 +174,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [feeNotes, setFeeNotes] = useState<ExactFeeNoteRecord[]>([]);
   const [matters, setMatters] = useState<Awaited<ReturnType<typeof fetchMatters>>>([]);
   const [clients, setClients] = useState<ExactClientRecord[]>(() => EXACT_CLIENTS);
-  const [users, setUsers] = useState<SystemUser[]>(() => {
-    try {
-      const deletedKeys = getDeletedUserKeys();
-      const stored = typeof window !== 'undefined' ? localStorage.getItem('EXACT_USERS') : null;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const valid = parsed.filter(u => !isUserRecordDeleted(u, deletedKeys));
-          if (valid.length > 0) return valid;
-        }
-      }
-    } catch (e) {}
-    const deletedKeys = getDeletedUserKeys();
-    return SEEDED_USERS.filter(u => !isUserRecordDeleted(u, deletedKeys));
-  });
+  const [users, setUsers] = useState<SystemUser[]>([]);
   const [roleTemplates, setRoleTemplates] = useState<RoleTemplate[]>(DEFAULT_ROLE_TEMPLATES);
   const [userRoleMap, setUserRoleMap] = useState<Record<string, string>>({});
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(() => getActivityLogs());
@@ -195,6 +196,82 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [roleDropdownUser, setRoleDropdownUser] = useState<string | null>(null);
   const [userActionMenuId, setUserActionMenuId] = useState<string | null>(null);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
+
+  // Real Paystack & Payments State
+  const [payments, setPayments] = useState<DashboardPaymentRecord[]>([]);
+  const [paymentLoadError, setPaymentLoadError] = useState('');
+  const [showPaystackModal, setShowPaystackModal] = useState(false);
+  const [selectedPaystackFeeNote, setSelectedPaystackFeeNote] = useState<ExactFeeNoteRecord | null>(null);
+  const [customPaystackAmount, setCustomPaystackAmount] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<'paystack' | 'cash' | 'bank_cheque'>('paystack');
+  const [bankChequeMethod, setBankChequeMethod] = useState<'bank_transfer' | 'cheque'>('bank_transfer');
+  const [isCustomPayment, setIsCustomPayment] = useState(false);
+  const [customPaymentDescription, setCustomPaymentDescription] = useState('');
+  const [paymentPhone, setPaymentPhone] = useState('');
+  const [paymentEmail, setPaymentEmail] = useState('');
+  const [paymentAccountNumber, setPaymentAccountNumber] = useState('');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [billingPeriod, setBillingPeriod] = useState<'all' | 'today'>('all');
+  const [showBillingBreakdown, setShowBillingBreakdown] = useState(false);
+  const [isPaystackLoading, setIsPaystackLoading] = useState(false);
+  const [paystackNotice, setPaystackNotice] = useState<string>('');
+
+  // Show today's schedule first; chat is available from the adjacent tab.
+  const [todayActiveTab, setTodayActiveTab] = useState<'schedule' | 'chat'>('schedule');
+  const [chatSessionId] = useState(() => `dashboard-${Date.now()}`);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+  }>>([]);
+  const [isChatSending, setIsChatSending] = useState(false);
+
+  const sendChatMessage = async (messageText = chatInput) => {
+    const message = messageText.trim();
+    if (!message || isChatSending) return;
+
+    setChatInput('');
+    setChatMessages(previous => [
+      ...previous,
+      { id: `user-${Date.now()}`, role: 'user', content: message }
+    ]);
+    setIsChatSending(true);
+
+    try {
+      const reply = await sendNyagahChatMessage({
+        message,
+        sessionId: chatSessionId,
+        userId: currentUser?.id || '',
+        userName: currentUser?.fullName || 'Firm member',
+        firmId: currentUser?.firmId,
+        history: chatMessages
+          .filter(turn => !turn.id.startsWith('error-'))
+          .map(({ role, content }) => ({ role, content })),
+      });
+      setChatMessages(previous => [
+        ...previous,
+        { id: `assistant-${Date.now()}`, role: 'assistant', content: reply }
+      ]);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Please try again.';
+      setChatMessages(previous => [
+        ...previous,
+        { id: `error-${Date.now()}`, role: 'assistant', content: `I could not connect. ${reason}` }
+      ]);
+    } finally {
+      setIsChatSending(false);
+    }
+  };
+
+  const handleQuickPrompt = async (prompt: 'Explain the money' | "What's still owed?" | "Today's hearings") => {
+    await sendChatMessage(prompt);
+  };
+
+  // Master Litigation & Collections Hub ('matters' | 'bills' | 'clients')
+  const [hubTab, setHubTab] = useState<'matters' | 'bills' | 'clients'>('matters');
+  const [hubSearch, setHubSearch] = useState('');
 
   // Enterprise Table Controls (Universal Search, Faceted Filtering, Sorting & Pagination)
   const [tableSearch, setTableSearch] = useState('');
@@ -468,9 +545,189 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => window.removeEventListener('databaseRealtimeUpdate', handleRealtime);
   }, [currentUser?.firmId]);
 
+  // Load firm payment records through the signed-in user's database permissions.
+  const loadPayments = async () => {
+    const firmId = currentUser?.firmId;
+    if (!firmId) {
+      setPayments([]);
+      setPaymentLoadError('Sign in to view this firm’s payment records.');
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .select('id,firm_id,fee_note_id,amount,payment_date,reference,status,payment_method,description,phone_number,account_number,provider_reference')
+        .eq('firm_id', firmId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setPayments((data || []).map((row: any) => ({
+        id: row.id,
+        feeNoteId: row.fee_note_id || '',
+        amount: Number(row.amount) || 0,
+        paymentDate: row.payment_date || '',
+        reference: row.reference || '',
+        status: row.status === 'confirmed' || row.status === 'reversed' ? row.status : 'pending',
+        paymentMethod: row.payment_method || '',
+        description: row.description || '',
+        phoneNumber: row.phone_number || '',
+        accountNumber: row.account_number || '',
+        providerReference: row.provider_reference || '',
+      })));
+      setPaymentLoadError('');
+    } catch (error) {
+      setPaymentLoadError(error instanceof Error ? error.message : 'Payment records could not be loaded.');
+    }
+  };
+
+  useEffect(() => {
+    void loadPayments();
+    const handlePaymentsUpdate = () => void loadPayments();
+    window.addEventListener('paymentsUpdated', handlePaymentsUpdate);
+    return () => window.removeEventListener('paymentsUpdated', handlePaymentsUpdate);
+  }, [currentUser?.firmId]);
+
+  const handleProcessPayment = async (fn: ExactFeeNoteRecord | null, amountToPay: number) => {
+    if (!Number.isFinite(amountToPay) || amountToPay <= 0) {
+      setPaystackNotice('Enter an amount greater than zero.');
+      return;
+    }
+    if (fn && amountToPay > getFeeNoteBalance(fn)) {
+      setPaystackNotice('The amount cannot be greater than the unpaid fee note balance.');
+      return;
+    }
+    const description = isCustomPayment
+      ? customPaymentDescription.trim()
+      : fn?.billNumber || '';
+    if (!description) {
+      setPaystackNotice('Enter a payment description.');
+      return;
+    }
+
+    setIsPaystackLoading(true);
+    setPaystackNotice('');
+    try {
+      if (paymentMethod === 'paystack') {
+        if (!paymentPhone.trim()) {
+          setPaystackNotice('Enter the client’s phone number.');
+          return;
+        }
+        if (!paymentEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentEmail.trim())) {
+          setPaystackNotice('Enter a valid client email for the payment prompt.');
+          return;
+        }
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (!sessionData.session?.access_token) {
+          throw new Error('Your sign-in has expired. Sign in again before sending a prompt.');
+        }
+        const res = await fetch('/api/v1/payments/paystack/charge', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+          },
+          body: JSON.stringify({
+            firm_id: currentUser?.firmId,
+            fee_note_id: isCustomPayment ? null : fn?.id || null,
+            description,
+            phone_number: paymentPhone.trim(),
+            client_email: paymentEmail.trim(),
+            amount: amountToPay,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'pending') {
+          throw new Error(data.detail || 'Paystack could not send the payment prompt.');
+        }
+        await loadPayments();
+        setPaystackNotice(`Prompt sent to ${paymentPhone.trim()}. The payment will show as confirmed after Paystack verifies it.`);
+      } else {
+        if (!paymentConfirmed) {
+          setPaystackNotice('Confirm that the payment has been received before recording it.');
+          return;
+        }
+        if (paymentMethod === 'bank_cheque' && bankChequeMethod === 'bank_transfer' && (!paymentAccountNumber.trim() || !paymentReference.trim())) {
+          setPaystackNotice('Enter the bank account number and transfer reference.');
+          return;
+        }
+        if (paymentMethod === 'bank_cheque' && bankChequeMethod === 'cheque' && !paymentReference.trim()) {
+          setPaystackNotice('Enter the cheque number.');
+          return;
+        }
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (!sessionData.session?.user.id) {
+          throw new Error('Your sign-in has expired. Sign in again before recording a payment.');
+        }
+        const { error } = await supabase.from('payments').insert({
+          firm_id: currentUser?.firmId,
+          fee_note_id: isCustomPayment ? null : fn?.id || null,
+          amount: amountToPay,
+          payment_date: new Date().toISOString().slice(0, 10),
+          reference: paymentReference.trim() || null,
+          status: 'confirmed',
+          received_by: sessionData.session.user.id,
+          payment_method: paymentMethod === 'bank_cheque' ? bankChequeMethod : paymentMethod,
+          description,
+          phone_number: paymentPhone.trim() || null,
+          account_number: paymentMethod === 'bank_cheque' && bankChequeMethod === 'bank_transfer' ? paymentAccountNumber.trim() : null,
+        });
+        if (error) throw error;
+        await loadPayments();
+        setPaystackNotice(`KES ${amountToPay.toLocaleString('en-KE', { minimumFractionDigits: 2 })} recorded.`);
+      }
+
+      setPaymentConfirmed(false);
+      setPaymentReference('');
+      setPaymentAccountNumber('');
+      setCustomPaystackAmount('');
+      if (paymentMethod !== 'paystack') setTimeout(() => {
+        setShowPaystackModal(false);
+        setPaystackNotice('');
+      }, 1200);
+    } catch (error) {
+      setPaystackNotice(error instanceof Error ? error.message : 'The payment could not be processed.');
+    } finally {
+      setIsPaystackLoading(false);
+    }
+  };
+
+  const openPaymentModal = (
+    feeNote: ExactFeeNoteRecord | null = payableFeeNotes[0] || null,
+    method: typeof paymentMethod = 'paystack'
+  ) => {
+    setSelectedPaystackFeeNote(feeNote && getFeeNoteBalance(feeNote) > 0 ? feeNote : payableFeeNotes[0] || null);
+    setCustomPaystackAmount('');
+    setIsCustomPayment(false);
+    setCustomPaymentDescription('');
+    setPaymentMethod(method);
+    setBankChequeMethod('bank_transfer');
+    const selectedNote = feeNote && getFeeNoteBalance(feeNote) > 0 ? feeNote : payableFeeNotes[0] || null;
+    const matchingClient = selectedNote
+      ? clients.find(client =>
+          client.name.trim().toLowerCase() === selectedNote.clientName.trim().toLowerCase() ||
+          client.company.trim().toLowerCase() === selectedNote.clientName.trim().toLowerCase()
+        )
+      : undefined;
+    setPaymentPhone(matchingClient?.phonePrimary || matchingClient?.phone || matchingClient?.phoneSecondary || '');
+    setPaymentEmail(matchingClient?.email || '');
+    setCustomPaystackAmount(selectedNote ? String(getFeeNoteBalance(selectedNote)) : '');
+    setPaymentAccountNumber('');
+    setPaymentReference('');
+    setPaymentConfirmed(false);
+    setPaystackNotice('');
+    setShowPaystackModal(true);
+  };
+
   // Load Executive Data (Users, Clients, Role Templates & Audit Logs)
   useEffect(() => {
-    const firmId = currentUser?.firmId || 'firm-001';
+    const firmId = currentUser?.firmId;
+    if (!firmId) {
+      setUsers([]);
+      setClients([]);
+      showToast('error', 'Firm profile unavailable', 'Sign in again after your account has been linked to an active firm.');
+      return;
+    }
 
     const loadExecutiveData = async () => {
       try {
@@ -479,8 +736,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           fetchClients(firmId),
           fetchRoleTemplates()
         ]);
-        setUsers(loadedUsers && loadedUsers.length > 0 ? loadedUsers : SEEDED_USERS);
-        setClients(loadedClients && loadedClients.length > 0 ? loadedClients : EXACT_CLIENTS);
+        setUsers(loadedUsers);
+        setClients(loadedClients);
         setRoleTemplates(loadedTemplates && loadedTemplates.length > 0 ? loadedTemplates : DEFAULT_ROLE_TEMPLATES);
 
         const localMap = getLocalUserRoleAssignments();
@@ -494,9 +751,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         });
         setUserRoleMap(initialMap);
       } catch (e) {
-        setUsers(SEEDED_USERS);
-        setClients(EXACT_CLIENTS);
-        setRoleTemplates(DEFAULT_ROLE_TEMPLATES);
+        setUsers([]);
+        setClients([]);
+        showToast('error', 'Could not load firm data', e instanceof Error ? e.message : 'Check your connection and database permissions.');
       }
     };
 
@@ -1559,12 +1816,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     (sum, m) => sum + (m.amount || 0), 0
   );
 
-  // Realtime Revenue & Billings Calculations
-  const totalBilled = feeNotes.reduce((sum, fn) => sum + (fn.grandTotal || 0), 0);
-  const processedNotes = feeNotes.filter(fn => fn.status === 'processed');
-  const totalApproved = processedNotes.reduce((sum, fn) => sum + (fn.grandTotal || 0), 0);
-  const draftNotes = feeNotes.filter(fn => fn.status === 'draft');
-  const totalDraft = draftNotes.reduce((sum, fn) => sum + (fn.grandTotal || 0), 0);
+  const now = new Date();
+  const todayDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const todaysMatters = matters.filter(m => m.hearingDate?.slice(0, 10) === todayDateStr);
+  const issuedFeeNotes = feeNotes.filter(fn => fn.status !== 'draft');
+  const totalBilled = issuedFeeNotes.reduce((sum, fn) => sum + (fn.grandTotal || 0), 0);
+  const confirmedPayments = payments.filter(p => p.status === 'confirmed');
+  const totalCollected = confirmedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const getFeeNoteBalance = (note: ExactFeeNoteRecord) => {
+    const linkedPayments = confirmedPayments
+      .filter(payment => payment.feeNoteId === note.id)
+      .reduce((paid, payment) => paid + (Number(payment.amount) || 0), 0);
+    const paidAmount = Math.max(Number(note.paidAmount) || 0, linkedPayments);
+    return note.status === 'paid' || note.status === 'settled'
+      ? 0
+      : Math.max(0, (Number(note.grandTotal) || 0) - paidAmount);
+  };
+  const totalOutstanding = issuedFeeNotes.reduce((sum, note) => sum + getFeeNoteBalance(note), 0);
+  const payableFeeNotes = issuedFeeNotes.filter(note => getFeeNoteBalance(note) > 0);
+
+  const feeNotesBilledToday = issuedFeeNotes.filter(fn => fn.createdAt?.startsWith(todayDateStr));
+  const billingFeeNotes = billingPeriod === 'today' ? feeNotesBilledToday : issuedFeeNotes;
+  const billingNoteIds = new Set(billingFeeNotes.map(note => note.id));
+  const billingPayments = confirmedPayments.filter(payment =>
+    billingPeriod === 'all' ||
+    (payment.paymentDate && String(payment.paymentDate).slice(0, 10) === todayDateStr)
+  );
+  const billingTotal = billingFeeNotes.reduce((sum, note) => sum + (Number(note.grandTotal) || 0), 0);
+  const billingCollected = billingPayments
+    .filter(payment => billingPeriod === 'all' || billingNoteIds.has(payment.feeNoteId))
+    .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const billingPending = billingFeeNotes.reduce((sum, note) => sum + getFeeNoteBalance(note), 0);
 
   // Group by client and sort by highest billed amount (Real Dynamic Top Billed Clients)
   const clientBillingMap: Record<string, { total: number; count: number; category: string }> = {};
@@ -3255,8 +3537,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             }}
             className="px-3.5 py-2 bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
           >
-            <UploadCloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <UploadCloud className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
             <span>Import Excel</span>
+          </button>
+
+          {/* Minimalist & Modern BOC Calc button beside Import Excel */}
+          <button
+            onClick={() => setShowBocCalc(prev => !prev)}
+            className={`px-3.5 py-2 border rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+              showBocCalc
+                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white shadow-xs'
+                : 'bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-[var(--border-color)]'
+            }`}
+          >
+            <Calculator className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+            <span>{showBocCalc ? 'Close BOC Calc' : 'Show BOC Calc'}</span>
           </button>
 
           {isExecutive && (
@@ -3264,31 +3559,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={() => onNavigateTab('clients')}
               className="px-3.5 py-2 bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <UserPlus className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
               <span>Add Client</span>
             </button>
           )}
-
-          <button
-            onClick={() => setShowBocCalc(prev => !prev)}
-            className={`px-3.5 py-2 border rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-              showBocCalc
-                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-                : 'bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-[var(--border-color)]'
-            }`}
-          >
-            <Calculator className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>{showBocCalc ? 'Hide Quick Fee Note' : 'Quick Fee Note'}</span>
-          </button>
 
           {isExecutive && (
             <button
               onClick={() => onOpenRecents ? onOpenRecents() : onNavigateTab('vault')}
               className="px-3.5 py-2 bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-[var(--border-color)] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Open Draft Fee Notes & Recent Files"
+              title="Open Recent Files"
             >
-              <Clock className="w-4 h-4 text-amber-500" />
-              <span>Drafts & Vault</span>
+              <Clock className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+              <span>Vault</span>
             </button>
           )}
         </div>
@@ -3309,173 +3592,241 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* LEFT MAIN CONTENT (8 Columns) */}
         <div className="col-span-12 lg:col-span-8 space-y-6 lg:space-y-8">
 
-          {/* Top Section: If Executive -> Show Real Dynamic "Revenue & Billings", "Today's Schedule (Blank)", and "Pending and Drafts" Cards */}
+          {/* Executive billing and today's schedule */}
           {isExecutive ? (
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
 
-              {/* Card 1: Revenue & Billings + Minimalist Top Billed Clients (7 cols) */}
-              <div className="md:col-span-7 modulix-card p-5 space-y-4 border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs">
-
-                {/* Header Strip */}
-                <div className="flex items-center justify-between pb-2.5 border-b border-[var(--border-color)]/60">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      <TrendingUp className="w-4 h-4" />
-                    </div>
+              {/* Card 1: Firm billing summary */}
+              <div className="md:col-span-7 modulix-card p-6 rounded-2xl border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs flex flex-col justify-between">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="font-brand font-bold text-sm text-slate-900 dark:text-white">
-                        Revenue & Billings
-                      </h3>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono">
-                        {feeNotes.length} fee notes recorded • <span className="text-emerald-600 font-bold">{processedNotes.length} Approved</span> • <span className="text-amber-600 font-bold">{draftNotes.length} Draft</span>
+                      <p className="text-xs font-semibold text-slate-500 dark:text-zinc-400">Fee Notes Bills</p>
+                      <p className="mt-1 text-2xl font-bold font-mono text-slate-900 dark:text-white">
+                        KES {billingTotal.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                       </p>
                     </div>
-                  </div>
-                </div>
-
-                {/* Total Claim Value & Financial Breakdown (Clean Streamlined Layout) */}
-                <div className="pt-2 space-y-3.5">
-                  {/* Primary Stat: Total claim value */}
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-semibold text-slate-600 dark:text-zinc-300 block">
-                      Total claim value
-                    </span>
-                    <p className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900 dark:text-white tracking-tight">
-                      KES {totalPortfolioValue > 0 ? totalPortfolioValue.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 italic">
-                      Sum of the {matters.length > 0 ? matters.length : '0'} active causes
-                    </p>
-                  </div>
-
-                  <div className="border-t border-[var(--border-color)]/60" />
-
-                  {/* Financial Breakdown (Billed, Outstanding, Collected) */}
-                  <div className="grid grid-cols-3 gap-3 py-0.5">
-                    <div>
-                      <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 uppercase tracking-wider block font-semibold">
-                        Billed
-                      </span>
-                      <p className="text-sm sm:text-base font-extrabold font-mono text-slate-900 dark:text-white mt-0.5">
-                        KES {totalBilled > 0 ? (totalBilled / 1000000).toFixed(2) + 'M' : '0.00'}
-                      </p>
-                    </div>
-
-                    <div>
-                      <span className="text-[10px] font-mono text-amber-700 dark:text-amber-400 uppercase tracking-wider block font-bold">
-                        Outstanding
-                      </span>
-                      <p className="text-sm sm:text-base font-extrabold font-mono text-amber-700 dark:text-amber-300 mt-0.5">
-                        KES {totalDraft > 0 ? (totalDraft / 1000000).toFixed(2) + 'M' : '0.00'}
-                      </p>
-                    </div>
-
-                    <div>
-                      <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block font-bold">
-                        Collected
-                      </span>
-                      <p className="text-sm sm:text-base font-extrabold font-mono text-emerald-700 dark:text-emerald-300 mt-0.5">
-                        KES {totalApproved > 0 ? (totalApproved / 1000000).toFixed(2) + 'M' : '0.00'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-[var(--border-color)]/60" />
-
-                  {/* Fee Notes Processed Row with View Breakdown & Open Fee Notes */}
-                  <div className="pt-1 space-y-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400">
-                          Fee notes processed:
-                        </span>
-                        <span className="text-sm font-bold font-mono text-slate-900 dark:text-white">
-                          {feeNotes.length}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowFeeBreakdown(!showFeeBreakdown)}
-                          className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer transition-colors ml-1"
-                        >
-                          <span>{showFeeBreakdown ? 'Hide fee notes' : 'View breakdown'}</span>
-                          {showFeeBreakdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
-
+                    <div className="relative">
                       <button
                         type="button"
-                        onClick={() => onNavigateTab('feenotes')}
-                        className="px-4 py-2 bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm cursor-pointer shrink-0"
+                        aria-expanded={showBillingBreakdown}
+                        aria-label={`Billing period: ${billingPeriod === 'all' ? 'All Fee Notes' : 'Today'}`}
+                        onClick={() => setShowBillingBreakdown(value => !value)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] px-3 py-2 text-[11px] font-medium text-slate-600 hover:bg-slate-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
                       >
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>Open Fee Notes</span>
+                        {billingPeriod === 'all' ? 'All Fee Notes' : 'Today'}
+                        {showBillingBreakdown ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       </button>
-                    </div>
-
-                    {/* Collapsible Fee Notes List (Hidden by default, shown when clicked) */}
-                    {showFeeBreakdown && (
-                      <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-2 animate-fadeIn max-h-56 overflow-y-auto">
-                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 pb-1 border-b border-[var(--border-color)]">
-                          <span>Fee Note</span>
-                          <span>Amount</span>
+                      {showBillingBreakdown && (
+                        <div className="absolute right-0 top-full z-10 mt-1 min-w-36 rounded-lg border border-[var(--border-color)] bg-white p-1 shadow-lg dark:bg-zinc-900">
+                          {([
+                            ['all', 'All Fee Notes'],
+                            ['today', 'Today'],
+                          ] as const).map(([period, label]) => (
+                            <button
+                              key={period}
+                              type="button"
+                              onClick={() => {
+                                setBillingPeriod(period);
+                                setShowBillingBreakdown(false);
+                              }}
+                              aria-pressed={billingPeriod === period}
+                              className={`block w-full rounded-md px-3 py-2 text-left text-[11px] ${
+                                billingPeriod === period
+                                  ? 'bg-slate-100 font-semibold text-slate-900 dark:bg-zinc-800 dark:text-white'
+                                  : 'text-slate-600 hover:bg-slate-50 dark:text-zinc-300 dark:hover:bg-zinc-800'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
                         </div>
-                        {feeNotes.length === 0 ? (
-                          <p className="text-center text-xs text-slate-400 py-2 font-sans">No fee notes recorded yet.</p>
-                        ) : (
-                          feeNotes.slice(0, 6).map(fn => (
-                            <div key={fn.id} className="flex items-center justify-between text-xs py-1 border-b border-[var(--border-color)]/30 last:border-0">
-                              <div className="min-w-0 pr-2">
-                                <span className="font-bold text-slate-900 dark:text-white font-mono block truncate">{fn.billNumber}</span>
-                                <span className="text-[11px] text-slate-500 truncate block">{fn.matterTitle || fn.clientName}</span>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <span className="font-mono font-bold text-slate-900 dark:text-white block">KES {fn.grandTotal.toLocaleString('en-KE', { minimumFractionDigits: 2 })}</span>
-                                <span className={`text-[10px] font-bold capitalize ${fn.status === 'processed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{fn.status}</span>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-
-                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-sans">
-                      Inspect the records contributing to each total.
-                    </p>
+                      )}
+                    </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3 border-t border-[var(--border-color)] pt-3">
+                    <div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">Confirmed payment</p>
+                      <p className="mt-1 text-sm font-semibold font-mono text-slate-900 dark:text-white">
+                        KES {billingCollected.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">Pending</p>
+                      <p className="mt-1 text-sm font-semibold font-mono text-slate-900 dark:text-white">
+                        KES {billingPending.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </div>
+                  {paymentLoadError && (
+                    <p role="alert" className="text-[11px] text-rose-600 dark:text-rose-400">{paymentLoadError}</p>
+                  )}
+                </div>
+
+                {/* Two Action Buttons: Open Fee Notes & Payments */}
+                <div className="flex items-center gap-3 pt-5 mt-4 border-t border-[var(--border-color)]/70">
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('feenotes')}
+                    className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Open Fee Notes</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openPaymentModal()}
+                    className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold border border-[var(--border-color)] bg-[var(--bg-subtle)] hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Payments</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Card 2 & 3: Today's Schedule (Blank) & Pending and Drafts (5 cols) */}
-              <div className="md:col-span-5 flex flex-col gap-4">
-
-                {/* Card 2: Today's Schedule (Blank & Minimalist) */}
-                <div className="modulix-card p-4 flex-1 flex flex-col justify-between border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-[var(--border-color)]/60">
-                      <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-white">
-                        <Calendar className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <h3 className="font-brand font-bold text-xs text-slate-900 dark:text-white">Today</h3>
-                        <span className="text-[9.5px] font-mono text-slate-400">0 events scheduled</span>
-                      </div>
-                    </div>
-
-                    <div className="py-5 text-center border border-dashed border-[var(--border-color)] rounded-xl bg-[var(--bg-subtle)]">
-                      <Calendar className="w-5 h-5 text-slate-300 dark:text-zinc-600 mx-auto mb-1" />
-                      <p className="text-[11px] text-slate-400 font-sans px-2">
-                        Docket is clear for today.
-                      </p>
+              {/* Card 2: Today (5 cols, two nav bars: Today's Schedule & Agent, NO background cards) */}
+              <div className="md:col-span-5 modulix-card p-6 rounded-2xl border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs flex flex-col justify-between">
+                <div className="space-y-4">
+                  {/* Header with 2-Tab Navigation Bar */}
+                  <div className="flex items-center justify-between pb-3 border-b border-[var(--border-color)]/70">
+                    <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-slate-700 dark:text-zinc-300" />
+                      <span>Today</span>
+                    </h3>
+                    {/* Minimalist 2-Tab Navigation Bar */}
+                    <div className="flex items-center p-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-subtle)]">
+                      <button
+                        type="button"
+                        onClick={() => setTodayActiveTab('schedule')}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer ${
+                          todayActiveTab === 'schedule'
+                            ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-xs'
+                            : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        Today's Schedule
+                      </button>
+                      {isNyagahAgentConfigured && <button
+                        type="button"
+                        onClick={() => setTodayActiveTab('chat')}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer ${
+                          todayActiveTab === 'chat'
+                            ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-xs'
+                            : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        Chat
+                      </button>}
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => onNavigateTab('matters')}
-                    className="w-full mt-2 py-1.5 text-[10.5px] font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 border border-[var(--border-color)] rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>View All Matters</span>
-                    <ChevronRight className="w-3 h-3" />
-                  </button>
+                  {/* Tab 1: Only matters with a hearing date today */}
+                  {todayActiveTab === 'schedule' ? (
+                    <div className="space-y-3">
+                      {todaysMatters.length === 0 ? (
+                        <p className="text-xs text-slate-400 py-6 text-center font-sans">
+                          No court matters or hearings scheduled for today.
+                        </p>
+                      ) : (
+                        todaysMatters.slice(0, 3).map((m) => (
+                          <div key={m.id} className="pb-3 border-b border-[var(--border-color)]/40 last:border-b-0 space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-900 dark:text-white truncate pr-2">
+                                {m.title}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500 font-semibold shrink-0">
+                                {m.hearingDate ? new Date(m.hearingDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (m.caseNo || 'Active')}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-snug">
+                              {m.courtStation || m.forum || 'High Court of Kenya'} {m.caseNo ? `• ${m.caseNo}` : ''}
+                              {m.courtActionRequired ? ` • ${m.courtActionRequired}` : ''}
+                            </p>
+                            <div className="text-[10px] font-mono text-slate-500 flex items-center justify-between pt-0.5">
+                              <span>{m.leadAdvocate ? `Counsel: ${m.leadAdvocate}` : (m.filedBy || 'Advocate on Record')}</span>
+                              <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                                {m.amount > 0 ? `Claim: KES ${m.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}` : 'Statutory Matter'}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      <div className="text-[11px] font-semibold text-slate-800 dark:text-zinc-200">
+                        Chat
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-zinc-400">
+                        {isNyagahAgentConfigured
+                          ? 'Your message, recent chat, matters, clients, and fee notes are sent to the configured assistant to answer.'
+                          : 'Assistant is not connected yet. Add the n8n webhook to enable chat.'}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(['Explain the money', "What's still owed?", "Today's hearings"] as const).map(prompt => (
+                          <button
+                            key={prompt}
+                            type="button"
+                            onClick={() => void handleQuickPrompt(prompt)}
+                            disabled={!isNyagahAgentConfigured || isChatSending}
+                            className="rounded-full border border-[var(--border-color)] bg-white px-2.5 py-1 text-[10px] font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
+                      <div
+                        className="max-h-44 min-h-24 space-y-2 overflow-y-auto rounded-lg border border-[var(--border-color)] bg-slate-50/60 p-2 dark:bg-zinc-800/40"
+                        aria-live="polite"
+                      >
+                        {chatMessages.length === 0 ? (
+                          <p className="py-7 text-center text-xs text-slate-500 dark:text-zinc-400">
+                            Choose a quick question to get started.
+                          </p>
+                        ) : (
+                          chatMessages.map(message => (
+                            <div
+                              key={message.id}
+                              className={`max-w-[90%] rounded-lg px-2.5 py-2 text-xs leading-relaxed ${
+                                message.role === 'user'
+                                  ? 'ml-auto bg-blue-600 text-white'
+                                  : 'bg-white text-slate-800 dark:bg-zinc-800 dark:text-zinc-100'
+                              }`}
+                            >
+                              {message.content}
+                            </div>
+                          ))
+                        )}
+                        {isChatSending && (
+                          <p className="text-xs text-slate-500 dark:text-zinc-400">Getting a reply...</p>
+                        )}
+                      </div>
+                      <form onSubmit={event => { event.preventDefault(); void sendChatMessage(); }} className="flex items-center gap-2">
+                        <input
+                          value={chatInput}
+                          onChange={event => setChatInput(event.target.value)}
+                          placeholder={isNyagahAgentConfigured ? 'Message the assistant' : 'Chat is not connected'}
+                          aria-label="Message the firm assistant"
+                          disabled={!isNyagahAgentConfigured || isChatSending}
+                          className="min-w-0 flex-1 rounded-lg border border-[var(--border-color)] bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-blue-500 dark:bg-zinc-900 dark:text-white"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!isNyagahAgentConfigured || isChatSending || !chatInput.trim()}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          <span>Send</span>
+                        </button>
+                      </form>
+                      <p className="text-[10px] text-slate-500 dark:text-zinc-500">
+                        {isNyagahAgentConfigured
+                          ? 'Check answers against the case file.'
+                          : 'Add the n8n chat webhook in the app environment to connect the assistant.'}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
               </div>
@@ -3485,17 +3836,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             const advName = (currentUser?.fullName || '').toLowerCase();
             const advEmail = (currentUser?.workEmail || '').toLowerCase();
 
-            // Advocate's fee notes
+            // Advocate's fee notes (Direct billing under ARO 2014)
             const myFeeNotes = feeNotes.filter(fn => {
               const gen = (fn.generatedByUser || '').toLowerCase();
               return gen.includes(advName) || (fn.generatedByUserId && fn.generatedByUserId === currentUser?.id) || (advEmail && advEmail.includes(gen));
             });
 
-            const myDraftNotes = myFeeNotes.filter(fn => fn.status === 'draft');
-            const myDraftExposure = myDraftNotes.reduce((acc, fn) => acc + (fn.grandTotal || 0), 0);
-            const mySubmittedNotes = myFeeNotes.filter(fn => fn.status === 'processed' && fn.approvalStatus === 'pending');
-            const myApprovedNotes = myFeeNotes.filter(fn => fn.status === 'processed' || fn.status === 'settled');
-            const myApprovedBilled = myApprovedNotes.reduce((acc, fn) => acc + (fn.grandTotal || 0), 0);
+            const myTotalBilled = myFeeNotes.reduce((acc, fn) => acc + (fn.grandTotal || 0), 0);
+            const myCollected = payments
+              .filter(p => myFeeNotes.some(fn => fn.id === p.feeNoteId))
+              .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+            const myOutstanding = Math.max(0, myTotalBilled - myCollected);
 
             // Advocate's assigned matters
             const myMatters = matters.filter(m => {
@@ -3526,38 +3877,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                   </div>
 
-                  {/* 3 Simple Metric Blocks: Drafts, Approved, Submitted */}
+                  {/* 3 Real Metric Blocks: Active Fee Notes, Collected, Outstanding */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                    {/* Drafts */}
+                    {/* Active Fee Notes */}
                     <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Drafts</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Active Fee Notes</span>
                       <p className="font-mono font-bold text-xl text-slate-900 dark:text-white">
-                        {myDraftNotes.length}
+                        {myFeeNotes.length}
                       </p>
-                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold truncate">
-                        KES {myDraftExposure > 0 ? (myDraftExposure / 1000000).toFixed(2) + 'M in progress' : '0.00'}
+                      <p className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold truncate">
+                        KES {myTotalBilled > 0 ? (myTotalBilled >= 1000000 ? (myTotalBilled / 1000000).toFixed(2) + 'M billed' : myTotalBilled.toLocaleString('en-KE', { minimumFractionDigits: 2 })) : '0.00'}
                       </p>
                     </div>
 
-                    {/* Approved Fee Notes */}
+                    {/* Collected Settlements */}
                     <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Approved Fee Notes</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Collected Settlements</span>
                       <p className="font-mono font-bold text-xl text-emerald-600 dark:text-emerald-400">
-                        {myApprovedNotes.length}
+                        KES {myCollected > 0 ? (myCollected >= 1000000 ? (myCollected / 1000000).toFixed(2) + 'M' : myCollected.toLocaleString('en-KE', { minimumFractionDigits: 2 })) : '0.00'}
                       </p>
                       <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold truncate">
-                        KES {myApprovedBilled > 0 ? (myApprovedBilled / 1000000).toFixed(2) + 'M billed' : '0.00'}
+                        Reconciled via Paystack
                       </p>
                     </div>
 
-                    {/* Bills Submitted */}
+                    {/* Outstanding Balance */}
                     <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-[var(--border-color)] space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Bills Submitted</span>
-                      <p className="font-mono font-bold text-xl text-slate-900 dark:text-white">
-                        {mySubmittedNotes.length}
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 block font-medium">Outstanding Balance</span>
+                      <p className="font-mono font-bold text-xl text-amber-600 dark:text-amber-400">
+                        KES {myOutstanding > 0 ? (myOutstanding >= 1000000 ? (myOutstanding / 1000000).toFixed(2) + 'M' : myOutstanding.toLocaleString('en-KE', { minimumFractionDigits: 2 })) : '0.00'}
                       </p>
-                      <p className="text-[11px] text-slate-400">
-                        {mySubmittedNotes.length > 0 ? 'Pending partner review' : 'No bills pending'}
+                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold truncate">
+                        Pending client settlement
                       </p>
                     </div>
                   </div>
@@ -3921,104 +4272,115 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
             );
-          })() : (
-            <div className="flex justify-end">
-              <button
-                onClick={() => setShowBocCalc(true)}
-                className="p-2.5 bg-[var(--bg-card)] border border-[var(--border-color)]/60 rounded-xl text-slate-400 hover:text-emerald-500 transition-colors shadow-sm flex items-center gap-2 cursor-pointer"
-                title="Show BOC Calc"
-              >
-                <Eye className="w-4 h-4" />
-                <span className="text-xs font-bold uppercase tracking-wider">Show BOC Calc</span>
-              </button>
-            </div>
-          )}
+          })() : null}
 
         </div>
 
         {/* RIGHT AUXILIARY COLUMN (4 Columns): Recent Activities */}
         <div className="col-span-12 lg:col-span-4 space-y-6">
           {isExecutive ? (
-            <div className="modulix-card space-y-4 border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs">
+            <div className="modulix-card p-6 rounded-2xl border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-[var(--border-color)]/70">
-                <h3 className="font-brand font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-slate-700 dark:text-zinc-300" /> Recent Activities
+                <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-slate-700 dark:text-zinc-300" />
+                  <span>Recent Activities</span>
                 </h3>
+                <span className="text-[11px] font-mono text-slate-400">Live Feed</span>
               </div>
 
-              {/* Dynamic Real Activity Feed (Fee Notes, Users, Emails & Messages) */}
+              {/* Recent audit events only; billing and payment records stay in their own views. */}
               {(() => {
-                // Filter out repeated profile updates and deduplicate
-                const seenActions = new Set<string>();
-                const cleanActivities = activityLogs.filter(log => {
-                  const text = `${log.action || ''} ${log.actionDescription || ''}`.toLowerCase();
-                  if (text.includes('coordinates and preferences')) return false;
-                  const key = `${log.advocateName}-${log.action}`;
-                  if (seenActions.has(key)) return false;
-                  seenActions.add(key);
-                  return true;
-                });
-
-                // Real firm actions from database fee notes & matters if feed is sparse
-                const finalActivities = [...cleanActivities];
-                if (finalActivities.length < 3) {
-                  feeNotes.forEach(fn => {
-                    const key = `${fn.generatedByUser}-feenote-${fn.billNumber}`;
-                    if (!seenActions.has(key)) {
-                      seenActions.add(key);
-                      finalActivities.push({
-                        id: `fn-${fn.id}`,
-                        advocateName: fn.generatedByUser || 'Firm Advocate',
-                        action: `${fn.status === 'processed' ? 'approved' : 'drafted'} ${fn.billNumber} (${fn.matterTitle})`,
-                        timeAgo: 'Recently',
-                        timestamp: fn.createdAt ? new Date(fn.createdAt).getTime() : Date.now(),
-                        type: 'feenote',
-                        badgeColor: fn.status === 'processed' ? 'bg-emerald-500' : 'bg-blue-500'
-                      });
-                    }
-                  });
+                interface ActivityItem {
+                  id: string;
+                  source: 'Audit';
+                  info: string;
+                  time: string;
+                  timestamp: number;
                 }
 
-                const displayList = showAllActivities ? finalActivities : finalActivities.slice(0, 6);
+                const feed: ActivityItem[] = [];
+
+                const currentAdvName = (currentUser?.fullName || '').toLowerCase();
+                const currentWorkEmail = (currentUser?.workEmail || (currentUser as any)?.email || '').toLowerCase();
+
+                activityLogs.forEach(log => {
+                  const logAdv = (log.advocateName || '').toLowerCase();
+                  const act = log.action || log.actionDescription || '';
+                  if (!act || act.toLowerCase().includes('coordinates and preferences')) return;
+                  const isCurrentUserLog = Boolean(
+                    (currentAdvName && logAdv.includes(currentAdvName)) ||
+                    (logAdv && currentWorkEmail.includes(logAdv))
+                  );
+
+                  if (
+                    log.type === 'login' ||
+                    log.type === 'permission' ||
+                    log.type === 'profile' ||
+                    log.type === 'settings' ||
+                    isCurrentUserLog
+                  ) {
+                    const actor = log.advocateName || 'A firm member';
+                    const auditSummary = log.type === 'login'
+                      ? `${actor} signed in`
+                      : log.type === 'permission'
+                        ? `${actor} changed access settings`
+                        : log.type === 'profile'
+                          ? `${actor} updated their profile`
+                          : log.type === 'settings'
+                            ? `${actor} changed firm settings`
+                            : `${actor}: ${act}`;
+                    feed.push({
+                      id: `audit-${log.id}`,
+                      source: 'Audit',
+                      info: auditSummary,
+                      time: log.timeAgo || 'Recently',
+                      timestamp: log.timestamp || Date.now() - 3600000
+                    });
+                  }
+                });
+
+                feed.sort((a, b) => b.timestamp - a.timestamp);
+                const displayList = showAllActivities ? feed : feed.slice(0, 6);
 
                 return (
-                  <>
-                    <div className="relative pl-6 space-y-4 max-h-[520px] overflow-y-auto pr-1 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-zinc-800">
-                      {displayList.length === 0 ? (
-                        <div className="p-6 text-center text-slate-400 text-xs font-sans">
-                          No recent activities recorded yet.
-                        </div>
-                      ) : (
-                        displayList.map((log, idx) => {
-                          const dotColor = log.badgeColor || (idx % 3 === 0 ? 'bg-emerald-500' : idx % 3 === 1 ? 'bg-blue-500' : 'bg-purple-500');
-                          const relativeTime = log.timeAgo || 'Recently';
-                          return (
-                            <div key={log.id} className="relative group">
-                              <div className={`absolute -left-6 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white dark:ring-zinc-900 ${dotColor}`} />
-                              <div className="min-w-0">
-                                <p className="text-xs text-slate-800 dark:text-zinc-200 font-sans leading-snug">
-                                  <strong className="text-slate-900 dark:text-white font-semibold">{log.advocateName}</strong>{' '}
-                                  {log.action || log.actionDescription || 'filed billing ledger entry'}
-                                </p>
-                                <p className="text-[10px] font-mono text-slate-400 mt-0.5">
-                                  {relativeTime}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
+                  <div className="space-y-3">
+                    {displayList.length === 0 ? (
+                      <div className="p-6 text-center text-slate-400 text-xs font-sans">
+                        No recent activities recorded yet.
+                      </div>
+                    ) : (
+                      displayList.map((item) => (
+                        <div
+                          key={item.id}
+                          className="pb-3 border-b border-[var(--border-color)]/40 last:border-b-0 space-y-1"
+                        >
+                          {/* Top: Source label & Icon */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-slate-700 dark:text-zinc-300" />
+                              <span>{item.source}</span>
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">{item.time}</span>
+                          </div>
 
-                    {finalActivities.length > 6 && (
+                          {/* Under it: Detailed factual information */}
+                          <p className="text-xs text-slate-800 dark:text-zinc-200 leading-snug font-sans">
+                            {item.info}
+                          </p>
+                        </div>
+                      ))
+                    )}
+
+                    {feed.length > 6 && (
                       <button
+                        type="button"
                         onClick={() => setShowAllActivities(!showAllActivities)}
-                        className="w-full py-1.5 text-[11px] font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white border border-[var(--border-color)] rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer text-center"
+                        className="w-full py-2 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white border border-[var(--border-color)] rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer text-center"
                       >
-                        {showAllActivities ? 'Show Less' : `Load More (${finalActivities.length - 6} more)`}
+                        {showAllActivities ? 'Show Less' : `View More Activities (${feed.length - 6} more)`}
                       </button>
                     )}
-                  </>
+                  </div>
                 );
               })()}
             </div>
@@ -4067,11 +4429,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             {fn.clientName || fn.matterTitle}
                           </p>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
-                            fn.status === 'processed' || fn.status === 'settled'
+                            fn.status === 'settled'
                               ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
-                              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+                              : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20'
                           }`}>
-                            {fn.status === 'processed' || fn.status === 'settled' ? 'Approved' : 'Draft'}
+                            {fn.status === 'settled' ? 'Settled' : 'Active'}
                           </span>
                         </div>
 
@@ -4098,44 +4460,663 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       </div>
 
-      {/* FULL WIDTH EXECUTIVE TABLES & MATTERS */}
-      {isExecutive && (
-        <div className="w-full mt-6 lg:mt-8">
-          <div className="space-y-6">
-            {/* Minimalist 2-Column Grid: Advocate Workload & Client Accounts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <AdvocateWipLeaderboard
-                users={users}
-                matters={matters}
-                feeNotes={feeNotes}
-                onNavigateTab={onNavigateTab}
-                onNavigateToBuilder={onNavigateToBuilder}
-              />
+      {/* FULL WIDTH MASTER LITIGATION & COLLECTIONS HUB (OPTION 1) */}
+      {isExecutive && (() => {
+        const q = hubSearch.trim().toLowerCase();
+        const filteredMatters = matters.filter(m =>
+          !q ||
+          (m.title || '').toLowerCase().includes(q) ||
+          (m.caseNo || '').toLowerCase().includes(q) ||
+          (m.leadAdvocate || '').toLowerCase().includes(q) ||
+          (m.courtStation || '').toLowerCase().includes(q)
+        );
 
-              <ClientRetainerEscrowWidget
-                clients={clients}
-                matters={matters}
-                onNavigateTab={onNavigateTab}
-              />
+        const filteredFeeNotes = feeNotes.filter(fn =>
+          !q ||
+          (fn.billNumber || '').toLowerCase().includes(q) ||
+          (fn.clientName || '').toLowerCase().includes(q) ||
+          (fn.matterTitle || '').toLowerCase().includes(q)
+        );
+
+        const filteredClients = clients.filter(c =>
+          !q ||
+          (c.name || '').toLowerCase().includes(q) ||
+          (c.company || '').toLowerCase().includes(q) ||
+          (c.email || '').toLowerCase().includes(q)
+        );
+
+        return (
+          <div className="w-full mt-6 lg:mt-8">
+            <div className="modulix-card p-6 rounded-2xl border border-[var(--border-color)] bg-white dark:bg-zinc-900 shadow-xs space-y-5">
+              {/* Master Hub Header Strip */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[var(--border-color)]/70">
+                <div>
+                  <h2 className="font-brand font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                    <Scale className="w-5 h-5 text-slate-700 dark:text-zinc-300" />
+                    <span>Master Litigation &amp; Collections Hub</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 font-sans">
+                    High-contrast operations docket: Real matters, fee notes &amp; client accounts
+                  </p>
+                </div>
+
+                {/* View Selector Tabs & Search Input */}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* 3 Primary Operational Views */}
+                  <div className="flex items-center p-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)]">
+                    <button
+                      type="button"
+                      onClick={() => { setHubTab('matters'); setHubSearch(''); }}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        hubTab === 'matters'
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                          : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <span>View A: Active Litigation Docket</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-white/20 dark:bg-black/10">
+                        {matters.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setHubTab('bills'); setHubSearch(''); }}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        hubTab === 'bills'
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                          : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <span>View B: Fee Notes &amp; Collections</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-white/20 dark:bg-black/10">
+                        {feeNotes.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setHubTab('clients'); setHubSearch(''); }}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        hubTab === 'clients'
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                          : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <span>View C: Client Accounts</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-white/20 dark:bg-black/10">
+                        {clients.length}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Instant Search Bar */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder={`Search ${hubTab}...`}
+                      value={hubSearch}
+                      onChange={(e) => setHubSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 text-xs rounded-xl border border-[var(--border-color)] bg-white dark:bg-zinc-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-slate-500 w-44 sm:w-56 font-sans"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* VIEW A: Active Litigation Docket (Real Matters) */}
+              {hubTab === 'matters' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[var(--border-color)] text-[10.5px] font-mono uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                        <th className="py-2.5 px-3">Case Title &amp; Cause Number</th>
+                        <th className="py-2.5 px-3">Court Station &amp; Division</th>
+                        <th className="py-2.5 px-3">Subject Claim Value (ARO 2014)</th>
+                        <th className="py-2.5 px-3">Lead Counsel</th>
+                        <th className="py-2.5 px-3">Stage / Next Filing Action</th>
+                        <th className="py-2.5 px-3 text-right">Quick Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border-color)]/50 text-xs">
+                      {filteredMatters.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-slate-400 font-sans">
+                            No active litigation matters found in database.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredMatters.map((m) => (
+                          <tr key={m.id} className="hover:bg-slate-50/70 dark:hover:bg-zinc-800/40 transition-colors">
+                            <td className="py-3 px-3">
+                              <span className="font-bold text-slate-900 dark:text-white block font-brand truncate max-w-xs">
+                                {m.title}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500 block">
+                                {m.caseNo || m.matterNumber || 'Cause No. Pending'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="text-slate-800 dark:text-zinc-200 block truncate max-w-[200px]">
+                                {m.courtStation || m.forum || 'Milimani Commercial & Tax Div'}
+                              </span>
+                              <span className="text-[10.5px] text-slate-500 font-mono">
+                                {m.ctsCaseNumber || 'CTS Docket'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="font-mono font-bold text-slate-900 dark:text-white block">
+                                {m.amount > 0 ? `KES ${m.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}` : 'Statutory Floor'}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono">Schedule 6 ARO</span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="font-medium text-slate-800 dark:text-zinc-200 block">
+                                {m.leadAdvocate || m.filedBy || 'Firm Advocate'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="text-slate-700 dark:text-zinc-300 block truncate max-w-[220px]">
+                                {m.courtActionRequired || m.status || 'Active Mention'}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">
+                                {m.nextHearingDate || 'Hearing scheduled'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (onNavigateToBuilder) {
+                                      onNavigateToBuilder({
+                                        matterId: m.id,
+                                        matterTitle: m.title || `Matter ${m.caseNo}`,
+                                        caseNo: m.caseNo,
+                                        claimantName: m.applicant,
+                                        clientName: (m as any).clientName || m.applicant,
+                                        respondentName: m.respondent,
+                                        claimValue: m.amount || 0,
+                                        courtSchedule: 'schedule_6_high_court',
+                                        forumName: m.forum || 'REPUBLIC OF KENYA\nIN THE HIGH COURT OF KENYA',
+                                        documentType: 'fee_note'
+                                      }, false);
+                                    } else {
+                                      onNavigateTab('boc');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-[11px] font-semibold hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+                                >
+                                  Generate ARO Fee Note
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleViewMatter(m.id)}
+                                  className="px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  Open Cause
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* VIEW B: Unsettled Fee Notes & Collections Ledger */}
+              {hubTab === 'bills' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[var(--border-color)] text-[10.5px] font-mono uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                        <th className="py-2.5 px-3">Fee Note / Bill Number</th>
+                        <th className="py-2.5 px-3">Matter Reference</th>
+                        <th className="py-2.5 px-3">Amount Billed (KES)</th>
+                        <th className="py-2.5 px-3">Payment Status</th>
+                        <th className="py-2.5 px-3 text-right">Quick Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border-color)]/50 text-xs">
+                      {filteredFeeNotes.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-400 font-sans">
+                            No fee notes found in billing database.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredFeeNotes.map((fn) => {
+                          const isSettled = payments.some(p => p.feeNoteId === fn.id && p.status !== 'pending');
+                          return (
+                            <tr key={fn.id} className="hover:bg-slate-50/70 dark:hover:bg-zinc-800/40 transition-colors">
+                              <td className="py-3 px-3">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white block">
+                                  {fn.billNumber}
+                                </span>
+                                <span className="text-[11px] text-slate-500 block truncate max-w-xs">
+                                  {fn.clientName || 'Corporate Client'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="text-slate-800 dark:text-zinc-200 block truncate max-w-sm">
+                                  {fn.matterTitle || 'Commercial Litigation Services'}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {fn.createdAt ? fn.createdAt.split('T')[0] : 'Active Bill'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white text-sm block">
+                                  KES {(fn.grandTotal || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">ARO 2014 Scale</span>
+                              </td>
+                              <td className="py-3 px-3">
+                                {isSettled ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                                    Settled (Paystack)
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                                    Pending Settlement
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openPaymentModal(fn, 'paystack')}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-[11px] font-semibold hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+                                  >
+                                    Send Prompt
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => openPaymentModal(fn, 'cash')}
+                                    className="px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                                  >
+                                    Record Payment
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenNote(fn)}
+                                    className="px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                                  >
+                                    Download Sealed PDF
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* VIEW C: Client Accounts */}
+              {hubTab === 'clients' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[var(--border-color)] text-[10.5px] font-mono uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                        <th className="py-2.5 px-3">Client Name &amp; Entity</th>
+                        <th className="py-2.5 px-3">Email &amp; Contact</th>
+                        <th className="py-2.5 px-3">Category</th>
+                        <th className="py-2.5 px-3">Active Matters</th>
+                        <th className="py-2.5 px-3">Total Billed to Date</th>
+                        <th className="py-2.5 px-3 text-right">Quick Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border-color)]/50 text-xs">
+                      {filteredClients.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-slate-400 font-sans">
+                            No client records found in database.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredClients.map((c) => {
+                          const clientMatters = matters.filter(m => (m.applicant || '').toLowerCase().includes(c.name.toLowerCase()) || (m.title || '').toLowerCase().includes(c.name.toLowerCase()));
+                          const clientBills = feeNotes.filter(fn => (fn.clientName || '').toLowerCase().includes(c.name.toLowerCase()));
+                          const totalBilled = clientBills.reduce((sum, fn) => sum + (fn.grandTotal || 0), 0);
+                          return (
+                            <tr key={c.id} className="hover:bg-slate-50/70 dark:hover:bg-zinc-800/40 transition-colors">
+                              <td className="py-3 px-3">
+                                <span className="font-bold text-slate-900 dark:text-white block font-brand">
+                                  {c.name}
+                                </span>
+                                <span className="text-[10px] font-mono text-slate-500 block">
+                                  {c.company || c.kraPin || 'Client ID: ' + c.id}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="text-slate-800 dark:text-zinc-200 block truncate max-w-[200px]">
+                                  {c.email || 'accounts@client.co.ke'}
+                                </span>
+                                <span className="text-[10.5px] text-slate-500 font-mono">
+                                  {c.phone || c.phonePrimary || '+254 700 000 000'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-semibold border border-[var(--border-color)] bg-[var(--bg-subtle)] text-slate-700 dark:text-zinc-300">
+                                  {c.category || 'Corporate Client'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white">
+                                  {clientMatters.length} matter{clientMatters.length !== 1 ? 's' : ''}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white text-sm block">
+                                  KES {totalBilled.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  {clientBills.length} fee note{clientBills.length !== 1 ? 's' : ''}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      sessionStorage.setItem('OPEN_CLIENT_ID', c.id);
+                                      sessionStorage.setItem('OPEN_CLIENT_NAME', c.name);
+                                      onNavigateTab('clients');
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                                  >
+                                    View Briefs
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (onNavigateToBuilder) {
+                                        onNavigateToBuilder({ clientName: c.name }, false);
+                                      } else {
+                                        onNavigateTab('boc');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-[11px] font-semibold hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+                                  >
+                                    New Bill
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Payment entry */}
+      {showPaystackModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-[var(--border-color)] max-w-md w-full p-5 space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-[var(--border-color)]/70">
+              <div>
+                <h3 className="font-brand font-bold text-base text-slate-900 dark:text-white">Payment</h3>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">Choose a fee note and enter the amount in KES.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPaystackModal(false);
+                  setPaystackNotice('');
+                }}
+                aria-label="Close payment form"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <ExecutiveTabbedTables
-              feeNotes={feeNotes}
-              matters={matters}
-              users={users}
-              clients={clients}
-              userRoleMap={userRoleMap}
-              roleTemplates={roleTemplates}
-              onNavigateTab={onNavigateTab}
-              handleOpenAddUserModal={handleOpenAddUserModal}
-              handleOpenNote={handleOpenNote}
-              handleToggleProcess={handleToggleProcess}
-              handleViewMatter={handleViewMatter}
-              setManagingUser={setManagingUser}
-              setMessagingUser={setMessagingUser}
-              setMessageText={setMessageText}
-              handleDeleteUser={handleDeleteUser}
-            />
+            {paystackNotice && (
+              <div className="rounded-lg border border-[var(--border-color)] p-3 text-xs text-slate-700 dark:text-zinc-200">
+                <span>{paystackNotice}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                  {isCustomPayment ? 'Description' : 'Fee note'}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCustomPayment(value => !value);
+                    setSelectedPaystackFeeNote(null);
+                    setCustomPaystackAmount('');
+                    setCustomPaymentDescription('');
+                    setPaymentPhone('');
+                    setPaymentEmail('');
+                  }}
+                  className="text-xs font-semibold text-blue-700 hover:text-blue-900 dark:text-blue-400"
+                >
+                  {isCustomPayment ? 'Choose fee note' : 'Custom'}
+                </button>
+              </div>
+              {isCustomPayment ? (
+                <input
+                  value={customPaymentDescription}
+                  onChange={event => setCustomPaymentDescription(event.target.value)}
+                  aria-label="Custom payment description"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--border-color)] bg-white dark:bg-zinc-800 text-slate-900 dark:text-white"
+                />
+              ) : (
+                <select
+                  value={selectedPaystackFeeNote?.id || ''}
+                  onChange={(event) => {
+                    const found = issuedFeeNotes.find(note => note.id === event.target.value) || null;
+                    setSelectedPaystackFeeNote(found);
+                    setCustomPaystackAmount(found ? String(getFeeNoteBalance(found)) : '');
+                    const client = found
+                      ? clients.find(item =>
+                          item.name.trim().toLowerCase() === found.clientName.trim().toLowerCase() ||
+                          item.company.trim().toLowerCase() === found.clientName.trim().toLowerCase()
+                        )
+                      : undefined;
+                    setPaymentPhone(client?.phonePrimary || client?.phone || client?.phoneSecondary || '');
+                    setPaymentEmail(client?.email || '');
+                  }}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--border-color)] bg-slate-50 dark:bg-zinc-800/80 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-500 font-mono"
+                >
+                  <option value="">{issuedFeeNotes.length ? 'Select fee note' : 'No fee notes'}</option>
+                  {issuedFeeNotes.map(note => (
+                    <option key={note.id} value={note.id}>
+                      {note.billNumber} · {note.clientName} · KES {note.grandTotal.toLocaleString('en-KE')}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-300">
+              Phone number
+              <input
+                type="tel"
+                value={paymentPhone}
+                onChange={event => setPaymentPhone(event.target.value)}
+                aria-label="Client phone number"
+                className="w-full rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-xs font-normal text-slate-900 dark:bg-zinc-800 dark:text-white"
+              />
+            </label>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Amount</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">KES</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={customPaystackAmount}
+                  onChange={event => setCustomPaystackAmount(event.target.value)}
+                  aria-label="Payment amount in Kenyan shillings"
+                  className="w-full rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-mono text-slate-900 outline-none focus:ring-2 focus:ring-slate-500 dark:bg-zinc-800 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Payment channel</label>
+              <select
+                value={paymentMethod}
+                onChange={event => {
+                  const value = event.target.value;
+                  if (value === 'paystack' || value === 'bank_cheque' || value === 'cash') {
+                    setPaymentMethod(value);
+                  }
+                }}
+                className="w-full rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-xs text-slate-900 dark:bg-zinc-800 dark:text-white"
+              >
+                <option value="paystack">Send Prompt</option>
+                <option value="bank_cheque">Banks and Cheques</option>
+                <option value="cash">Cash</option>
+              </select>
+            </div>
+
+            {paymentMethod === 'bank_cheque' && (
+              <>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                  Payment type
+                  <select
+                    value={bankChequeMethod}
+                    onChange={event => {
+                      if (event.target.value === 'bank_transfer' || event.target.value === 'cheque') {
+                        setBankChequeMethod(event.target.value);
+                      }
+                    }}
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-xs text-slate-900 dark:bg-zinc-800 dark:text-white"
+                  >
+                    <option value="bank_transfer">Bank transfer</option>
+                    <option value="cheque">Cheque</option>
+                  </select>
+                </label>
+                {bankChequeMethod === 'bank_transfer' ? (
+                  <>
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Account number
+                      <input
+                        value={paymentAccountNumber}
+                        onChange={event => setPaymentAccountNumber(event.target.value)}
+                        aria-label="Bank account number"
+                        className="w-full rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-xs font-normal text-slate-900 dark:bg-zinc-800 dark:text-white"
+                      />
+                    </label>
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Transfer reference
+                      <input
+                        value={paymentReference}
+                        onChange={event => setPaymentReference(event.target.value)}
+                        aria-label="Bank transfer reference"
+                        className="w-full rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-xs font-normal text-slate-900 dark:bg-zinc-800 dark:text-white"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                    Cheque number
+                    <input
+                      value={paymentReference}
+                      onChange={event => setPaymentReference(event.target.value)}
+                      aria-label="Cheque number"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-xs font-normal text-slate-900 dark:bg-zinc-800 dark:text-white"
+                    />
+                  </label>
+                )}
+              </>
+            )}
+
+            {paymentMethod !== 'paystack' && (
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={paymentConfirmed}
+                  onChange={event => setPaymentConfirmed(event.target.checked)}
+                  className="mt-0.5"
+                />
+                Payment received and verified
+              </label>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPaystackModal(false);
+                  setPaystackNotice('');
+                }}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                disabled={isPaystackLoading}
+                onClick={() => {
+                  if (!isCustomPayment && !selectedPaystackFeeNote) {
+                    setPaystackNotice('Select a fee note first.');
+                    return;
+                  }
+                  if (!customPaystackAmount || !Number.isFinite(Number(customPaystackAmount)) || Number(customPaystackAmount) <= 0) {
+                    setPaystackNotice('Enter the payment amount in KES.');
+                    return;
+                  }
+                  if (isCustomPayment && !customPaymentDescription.trim()) {
+                    setPaystackNotice('Enter a payment description.');
+                    return;
+                  }
+                  if (paymentMethod === 'paystack' && !paymentPhone.trim()) {
+                    setPaystackNotice('Enter the client’s phone number.');
+                    return;
+                  }
+                  if (paymentMethod === 'paystack' && (!paymentEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentEmail.trim()))) {
+                    setPaystackNotice('Add a valid email address to the selected client’s record before sending a prompt.');
+                    return;
+                  }
+                  if (paymentMethod === 'bank_cheque' && bankChequeMethod === 'bank_transfer' && (!paymentAccountNumber.trim() || !paymentReference.trim())) {
+                    setPaystackNotice('Enter the bank account number and transfer reference.');
+                    return;
+                  }
+                  if (paymentMethod === 'bank_cheque' && bankChequeMethod === 'cheque' && !paymentReference.trim()) {
+                    setPaystackNotice('Enter the cheque number.');
+                    return;
+                  }
+                  if (paymentMethod !== 'paystack' && !paymentConfirmed) {
+                    setPaystackNotice('Confirm that the payment has been received before recording it.');
+                    return;
+                  }
+                  void handleProcessPayment(isCustomPayment ? null : selectedPaystackFeeNote, Number(customPaystackAmount));
+                }}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-50 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm cursor-pointer"
+              >
+                {isPaystackLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Processing Settlement...</span>
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>{paymentMethod === 'paystack' ? 'Send Prompt' : 'Record payment'}</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
